@@ -3,7 +3,7 @@ name: Schedule probe
 # Temporary diagnostic: proves whether GitHub runs scheduled workflows in this fork at all.
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/7 * * * *'
   workflow_dispatch:
 
 permissions:

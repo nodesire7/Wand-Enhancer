@@ -6,7 +6,8 @@ name: Sync upstream and build
 # everything that is new, so a delay only shifts the build, it does not lose commits.
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    # Off the hour on purpose: GitHub delays cron runs most at :00 and :30.
+    - cron: '17,47 * * * *'
   workflow_dispatch:
     inputs:
       force_build:
