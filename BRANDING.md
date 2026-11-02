@@ -13,11 +13,13 @@
 
 | 项目 | 说明 |
 | --- | --- |
-| 触发 | 每 30 分钟定时 + Actions 页面手动 `Run workflow` |
+| 触发 | GitHub 定时（每小时 `:17`、`:47` UTC）+ Actions 页面手动 `Run workflow` + 本机计划任务兜底 |
 | 上游 | `https://github.com/k1tbyte/Wand-Enhancer` 的 `master` |
 | 方式 | `git merge --no-ff upstream/master`，保留可追溯的合并历史 |
 | 冲突 | 一律取上游版本，然后由 `scripts/apply-branding.ps1` 重新写回本分支的改动 |
 | 结果 | 有更新才 push 并重新构建；已是最新则直接结束 |
+
+> 2026-11-02 实测：该 fork 的 GitHub `schedule` 事件没有投递（最小化 `*/5` 测试工作流运行 1 小时也没有任何 scheduled run）。这是 GitHub 侧的投递问题，社区也有同类报告。因此本机额外装了一个 Windows 计划任务，每 30 分钟调用一次 `workflow_dispatch`，两条路互不影响。
 
 ### 第一次启用
 
@@ -25,9 +27,23 @@ Fork 仓库的定时工作流默认可能处于关闭状态：
 
 1. 打开仓库 **Actions** 标签页，如果顶部提示工作流被禁用，点 **I understand my workflows, go ahead and enable them**。
 2. 打开 **Sync upstream and build**，点 **Run workflow**（可勾选 `force_build` 立刻构建一版）。
-3. 之后每 30 分钟自动运行。长时间（60 天）没有任何提交时 GitHub 会暂停定时任务，手动运行一次即可恢复。
+3. 之后由 GitHub 定时或本机计划任务触发。长时间（60 天）没有任何提交时 GitHub 会暂停定时任务，手动运行一次即可恢复。
 
-> 定时任务在 GitHub 繁忙时可能延迟几分钟到几十分钟，但每次运行都会合并全部新提交，不会漏更新。
+> 定时任务在 GitHub 繁忙时可能延迟，但每次运行都会合并全部新提交，不会漏更新。
+
+### 本机兜底：Windows 计划任务
+
+| 项目 | 说明 |
+| --- | --- |
+| 任务名 | `WandEnhancer Upstream Sync`，当前用户登录时每 30 分钟运行 |
+| 动作 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "F:\Code\Wemod\Wand-Enhancer\scripts\trigger-sync.ps1"` |
+| 作用 | 只调用 `gh workflow run sync-upstream.yml`，合并、构建、发布仍在 GitHub 上完成 |
+| 日志 | `%LOCALAPPDATA%\WandEnhancer-upstream-sync.log` |
+| 前提 | `gh auth status` 已登录 nodesire7；脚本会临时清掉失效的机器级 `GITHUB_TOKEN`，改用 gh 的登录凭据 |
+| 删除 | `schtasks /Delete /TN "WandEnhancer Upstream Sync" /F` |
+
+电脑关机时这个兜底不会运行，开机后会补触发。GitHub 定时恢复正常后两者会重复触发，工作流会自行判断“已是最新”并直接结束，不影响结果。
+
 
 ### 同步失败怎么办
 
