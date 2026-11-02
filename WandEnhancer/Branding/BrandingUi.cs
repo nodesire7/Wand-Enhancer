@@ -48,26 +48,34 @@ namespace WandEnhancer.Branding
             if (!(versionLabel.Parent is Panel host))
                 return;
 
-            var badge = new Border
+            int index = host.Children.IndexOf(versionLabel) + 1;
+            host.Children.Insert(index, CreatePill(
+                window, BrandingInfo.Badge, BrandingInfo.Tooltip, BrandingInfo.ForumUrl, 10));
+            host.Children.Insert(index + 1, CreatePill(
+                window, "TG", "TG: " + BrandingInfo.Telegram, BrandingInfo.TelegramUrl, 6));
+        }
+
+        private static Border CreatePill(Window window, string text, string tooltip, string url, double leftMargin)
+        {
+            var pill = new Border
             {
                 Background = window.TryFindResource("Secondary") as Brush,
                 CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(7, 2, 7, 2),
-                Margin = new Thickness(10, 0, 0, 0),
+                Margin = new Thickness(leftMargin, 0, 0, 0),
                 VerticalAlignment = VerticalAlignment.Center,
                 Cursor = Cursors.Hand,
-                ToolTip = BrandingInfo.Tooltip,
+                ToolTip = tooltip,
                 Child = new TextBlock
                 {
-                    Text = BrandingInfo.Badge,
+                    Text = text,
                     FontSize = 10.5,
                     FontWeight = FontWeights.SemiBold,
                     Foreground = window.TryFindResource("AccentForeground") as Brush
                 }
             };
-            badge.MouseLeftButtonUp += (sender, args) => Open(BrandingInfo.ForumUrl);
-
-            host.Children.Insert(host.Children.IndexOf(versionLabel) + 1, badge);
+            pill.MouseLeftButtonUp += (sender, args) => Open(url);
+            return pill;
         }
 
         private static void AddStartupLog(Window window)

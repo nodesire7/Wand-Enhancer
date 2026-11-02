@@ -35,9 +35,9 @@ if (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
 $lines = New-Object System.Collections.Generic.List[string]
 $lines.Add("# $($branding.product)")
 $lines.Add('')
-$lines.Add("**作者**：$($branding.author)（$($branding.note)）")
-$lines.Add("**论坛**：[$($branding.forum)]($($branding.forumUrl))")
-$lines.Add("**TG 群组**：[$($branding.telegram)]($($branding.telegramUrl))")
+$lines.Add("- **作者**：$($branding.author)（$($branding.note)）")
+$lines.Add("- **论坛**：[$($branding.forum)]($($branding.forumUrl))")
+$lines.Add("- **TG 群组**：[$($branding.telegram)]($($branding.telegramUrl))")
 $lines.Add('')
 
 if (-not [string]::IsNullOrWhiteSpace($UpstreamSha)) {
