@@ -44,6 +44,12 @@ Fork 仓库的定时工作流默认可能处于关闭状态：
 
 电脑关机时这个兜底不会运行，开机后会补触发。GitHub 定时恢复正常后两者会重复触发，工作流会自行判断“已是最新”并直接结束，不影响结果。
 
+换电脑或仓库路径变了以后，重新注册一次：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-sync-task.ps1
+```
+
 
 ### 同步失败怎么办
 
