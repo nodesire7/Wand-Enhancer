@@ -91,7 +91,14 @@ function Add-BrandingHook {
     param($File)
 
     $text = $File.Text
-    if ($text -match 'BrandingUi\.Apply\(') {
+    $notice = '// GBTGAME.ME fork: applies the fork build information without touching upstream XAML.'
+    $hookPattern = '(?m)^(?<indent>[ \t]*)WandEnhancer\.Branding\.BrandingUi\.Apply\(this\.MainWindow\);'
+
+    if ([System.Text.RegularExpressions.Regex]::IsMatch($text, $hookPattern)) {
+        if ($text -notmatch [System.Text.RegularExpressions.Regex]::Escape($notice)) {
+            $hook = [System.Text.RegularExpressions.Regex]::Match($text, $hookPattern)
+            $text = $text.Insert($hook.Index, $hook.Groups['indent'].Value + $notice + $File.NewLine)
+        }
         return $text
     }
 
@@ -102,9 +109,31 @@ function Add-BrandingHook {
         throw "App.xaml.cs: cannot find 'this.MainWindow.Show();' to insert the branding hook before."
     }
 
-    $hook = $anchor.Groups['indent'].Value +
-        'WandEnhancer.Branding.BrandingUi.Apply(this.MainWindow);' + $File.NewLine
+    $indent = $anchor.Groups['indent'].Value
+    $hook = $indent + $notice + $File.NewLine +
+        $indent + 'WandEnhancer.Branding.BrandingUi.Apply(this.MainWindow);' + $File.NewLine
     return $text.Insert($anchor.Index, $hook)
+}
+
+function Add-ForkNotice {
+    param(
+        [string]$Text,
+        [string]$NewLine
+    )
+
+    $notice = '// GBTGAME.ME fork: patched by scripts/apply-branding.ps1, which syncs reapply.'
+    if ($Text -match [System.Text.RegularExpressions.Regex]::Escape($notice)) {
+        return $Text
+    }
+
+    $anchor = [System.Text.RegularExpressions.Regex]::Match(
+        $Text,
+        '(?m)^(?<indent>[ \t]*)\[assembly: AssemblyTitle')
+    if (-not $anchor.Success) {
+        return $Text
+    }
+
+    return $Text.Insert($anchor.Index, $anchor.Groups['indent'].Value + $notice + $NewLine)
 }
 
 function Update-AssemblyAttribute {
@@ -195,7 +224,7 @@ $appText = Add-BrandingHook $app
 
 $assemblyInfoPath = Join-Path $root 'WandEnhancer/Properties/AssemblyInfo.cs'
 $assemblyInfo = Read-SourceFile $assemblyInfoPath
-$assemblyInfoText = $assemblyInfo.Text
+$assemblyInfoText = Add-ForkNotice $assemblyInfo.Text $assemblyInfo.NewLine
 $assemblyInfoText = Update-AssemblyAttribute $assemblyInfoText 'AssemblyTitle' $branding.product $assemblyInfo.NewLine
 $assemblyInfoText = Update-AssemblyAttribute $assemblyInfoText 'AssemblyDescription' $description $assemblyInfo.NewLine
 $assemblyInfoText = Update-AssemblyAttribute $assemblyInfoText 'AssemblyCompany' $branding.brand $assemblyInfo.NewLine

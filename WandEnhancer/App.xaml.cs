@@ -16,6 +16,7 @@ namespace WandEnhancer
         protected override void OnStartup(StartupEventArgs e)
         {
             LocalizationManager.Initialize();
+            // GBTGAME.ME fork: applies the fork build information without touching upstream XAML.
             WandEnhancer.Branding.BrandingUi.Apply(this.MainWindow);
             this.MainWindow.Show();
         }

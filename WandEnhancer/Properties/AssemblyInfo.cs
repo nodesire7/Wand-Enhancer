@@ -7,6 +7,7 @@ using System.Windows;
 // General Information about an assembly is controlled through the following
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
+// GBTGAME.ME fork: patched by scripts/apply-branding.ps1, which syncs reapply.
 [assembly: AssemblyTitle("WandEnhancer GBTGAME.ME 优化汉化版")]
 [assembly: AssemblyDescription("A-FEI- 优化汉化 | 论坛 bbs.GBTGAME.ME | TG t.me/GBTGame_Team")]
 [assembly: AssemblyConfiguration("")]
