@@ -1,0 +1,17 @@
+name: Schedule probe
+
+# Temporary diagnostic: proves whether GitHub runs scheduled workflows in this fork at all.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: echo "scheduled workflow is alive at $(date -u)"

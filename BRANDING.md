@@ -73,7 +73,7 @@ Windows 自带的 PowerShell 5.1 也可以：`powershell -ExecutionPolicy Bypass
 
 | 位置 | 内容 |
 | --- | --- |
-| 窗口标题栏徽章 | `GBTGAME.ME · A-FEI- · 优化汉化`，点击打开论坛，悬停显示论坛与 TG |
+| 窗口标题栏徽章 | `GBTGAME.ME · A-FEI- · 优化汉化`（点击打开论坛）和 `TG`（点击打开 TG 群），悬停显示论坛与 TG |
 | 窗口标题 / 任务栏 | `WandEnhancer GBTGAME.ME 优化汉化版 <版本号>` |
 | 主界面底部 | `Made with ❤️ by k1tbyte · 优化汉化 A-FEI-` 与 `bbs.GBTGAME.ME · t.me/GBTGame_Team` |
 | 运行日志首行 | 产品名、作者、论坛、TG、构建提交号（复制/导出日志时会一起带上，方便反馈问题） |
