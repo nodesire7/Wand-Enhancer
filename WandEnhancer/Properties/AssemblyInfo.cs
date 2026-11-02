@@ -7,12 +7,12 @@ using System.Windows;
 // General Information about an assembly is controlled through the following
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("WandEnhancer")]
-[assembly: AssemblyDescription("")]
+[assembly: AssemblyTitle("WandEnhancer GBTGAME.ME 优化汉化版")]
+[assembly: AssemblyDescription("A-FEI- 优化汉化 | 论坛 bbs.GBTGAME.ME | TG t.me/GBTGame_Team")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("WandEnhancer")]
-[assembly: AssemblyCopyright("Copyright ©  2025")]
+[assembly: AssemblyCompany("GBTGAME.ME")]
+[assembly: AssemblyProduct("WandEnhancer GBTGAME.ME 优化汉化版")]
+[assembly: AssemblyCopyright("Copyright © 2025 k1tbyte · 优化汉化 A-FEI- (GBTGAME.ME)")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

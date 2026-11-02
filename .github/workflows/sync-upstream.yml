@@ -1,0 +1,144 @@
+name: Sync upstream and build
+
+# Polls the upstream repository and merges it into this fork, then rebuilds and refreshes the
+# rolling release. GitHub cannot notify a fork on upstream pushes, so polling is the only
+# server-side option. Scheduled runs can be delayed while GitHub is busy; every run merges
+# everything that is new, so a delay only shifts the build, it does not lose commits.
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: Build and publish even when upstream is already merged
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      sha: ${{ steps.merge.outputs.sha }}
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v5
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Merge upstream master
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name 'GBTGAME sync bot'
+          git config user.email 'sync@users.noreply.github.com'
+          git remote add upstream https://github.com/k1tbyte/Wand-Enhancer.git 2>/dev/null || true
+          git fetch --no-tags upstream master
+          sha=$(git rev-parse --short upstream/master)
+
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "Fork already contains upstream/$sha"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Merging upstream/$sha"
+          if ! git merge --no-ff --no-edit -m "chore(sync): merge upstream $sha" upstream/master; then
+            echo 'Merge conflicts, taking the upstream side:'
+            git diff --name-only --diff-filter=U
+            while IFS= read -r path; do
+              if git cat-file -e ":3:$path" 2>/dev/null; then
+                git checkout --theirs -- "$path"
+                git add -- "$path"
+              else
+                git rm -q -f -- "$path"
+              fi
+            done < <(git diff --name-only --diff-filter=U)
+            # The branding script below restores every fork edit that lived in a shared file.
+            git commit -m "chore(sync): merge upstream $sha (conflicts resolved upstream-side)"
+          fi
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Reapply fork branding
+        if: steps.merge.outputs.changed == 'true'
+        shell: pwsh
+        run: ./scripts/apply-branding.ps1
+
+      - name: Commit branding and push
+        if: steps.merge.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git add -A
+            git commit -m 'chore(branding): reapply GBTGAME.ME build info'
+          fi
+          git push origin master
+
+  build:
+    name: Build and publish
+    needs: sync
+    if: needs.sync.outputs.changed == 'true' || inputs.force_build == true
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v5
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10.17.0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-panel/pnpm-lock.yaml
+
+      - name: Verify fork branding
+        shell: pwsh
+        run: ./scripts/apply-branding.ps1 -Check
+
+      - name: Build, test and repack
+        shell: pwsh
+        run: ./build.ps1 -Configuration Release
+
+      - name: Publish rolling release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $branding = Get-Content -Raw branding/branding.json | ConvertFrom-Json
+          $tag = 'gbtg-latest'
+          $notes = 'release-notes.md'
+          ./scripts/write-release-notes.ps1 -OutputPath $notes -UpstreamSha '${{ needs.sync.outputs.sha }}'
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title $branding.product --notes-file $notes
+          } else {
+            gh release create $tag --title $branding.product --notes-file $notes --latest --target master
+          }
+
+          $exe = 'WandEnhancer/bin/Release/WandEnhancer.exe'
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  WandEnhancer.exe" | Set-Content 'WandEnhancer.exe.sha256' -Encoding ascii
+          gh release upload $tag $exe 'WandEnhancer.exe.sha256' --clobber

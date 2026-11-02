@@ -1,0 +1,32 @@
+name: Verify fork branding
+
+# Fails when branding/branding.json, the generated C# or the two shared-file edits drift apart.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'branding/**'
+      - 'WandEnhancer/Branding/**'
+      - 'WandEnhancer/App.xaml.cs'
+      - 'WandEnhancer/Properties/AssemblyInfo.cs'
+      - 'scripts/apply-branding.ps1'
+  pull_request:
+    paths:
+      - 'branding/**'
+      - 'WandEnhancer/Branding/**'
+      - 'WandEnhancer/App.xaml.cs'
+      - 'WandEnhancer/Properties/AssemblyInfo.cs'
+      - 'scripts/apply-branding.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check branding
+        shell: pwsh
+        run: ./scripts/apply-branding.ps1 -Check

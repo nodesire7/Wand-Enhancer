@@ -16,6 +16,7 @@ namespace WandEnhancer
         protected override void OnStartup(StartupEventArgs e)
         {
             LocalizationManager.Initialize();
+            WandEnhancer.Branding.BrandingUi.Apply(this.MainWindow);
             this.MainWindow.Show();
         }
 

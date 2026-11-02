@@ -1,0 +1,9 @@
+<Project>
+  <!--
+    Fork branding lives in WandEnhancer/Branding. Compiling it from here keeps the legacy
+    project file untouched, so an upstream merge never has to resolve a csproj conflict.
+  -->
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\Branding\BrandingInfo.g.cs')">
+    <Compile Include="$(MSBuildProjectDirectory)\Branding\*.cs" />
+  </ItemGroup>
+</Project>
