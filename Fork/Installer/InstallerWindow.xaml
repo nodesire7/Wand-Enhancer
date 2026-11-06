@@ -54,6 +54,13 @@
                     <Border Background="{DynamicResource Border}" CornerRadius="2"><Grid x:Name="PART_Track"><Border x:Name="PART_Indicator" Background="{DynamicResource Primary}" HorizontalAlignment="Left" CornerRadius="2" /></Grid></Border>
                 </ControlTemplate></Setter.Value></Setter>
             </Style>
+            <Style x:Key="BackupListStyle" TargetType="ListBox">
+                <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBox">
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3">
+                        <ScrollViewer x:Name="PART_ScrollViewer" Background="Transparent" Focusable="False" Padding="2" CanContentScroll="True" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden"><ItemsPresenter /></ScrollViewer>
+                    </Border>
+                </ControlTemplate></Setter.Value></Setter>
+            </Style>
             <Style TargetType="Expander">
                 <Setter Property="Foreground" Value="{DynamicResource Foreground}" />
                 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Expander">
@@ -142,7 +149,7 @@
                             <TextBlock Text="恢复 Roaming 与注册表中的用户配置；恢复前自动保存当前配置。" Foreground="{DynamicResource MutedForeground}" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,9" />
                         </StackPanel>
                         <Grid Grid.Row="1">
-                            <ListBox x:Name="BackupList" SelectionChanged="BackupSelectionChanged" Background="{DynamicResource Muted}" Foreground="{DynamicResource Foreground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ScrollViewer.VerticalScrollBarVisibility="Hidden" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" AutomationProperties.Name="配置备份列表">
+                            <ListBox x:Name="BackupList" Style="{StaticResource BackupListStyle}" SelectionChanged="BackupSelectionChanged" Background="{DynamicResource Muted}" Foreground="{DynamicResource Foreground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ScrollViewer.VerticalScrollBarVisibility="Hidden" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" AutomationProperties.Name="配置备份列表">
                                 <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border x:Name="ItemBorder" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="3"><ContentPresenter /></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource Secondary}" /><Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource Border}" /></Trigger><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource Ring}" /></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style></ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="6,7"><TextBlock Text="{Binding Label}" /><TextBlock Text="{Binding Summary}" Foreground="{DynamicResource MutedForeground}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" /></StackPanel></DataTemplate></ListBox.ItemTemplate>
                             </ListBox>

@@ -26,6 +26,13 @@ internal static class InstallerTests
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 0)
+        {
+            output = AppDomain.CurrentDomain.BaseDirectory;
+            var preview = new Application();
+            preview.Run(new InstallerWindow(new FakeInteraction(), new FakeBackups()));
+            return 0;
+        }
         if (args.Length > 0 && args[0] == "--watch-updates")
         {
             File.WriteAllText(Path.Combine(args[1], "watcher.pid"), System.Diagnostics.Process.GetCurrentProcess().Id.ToString());
@@ -467,6 +474,15 @@ internal static class InstallerTests
         }
         finally { Registry.CurrentUser.DeleteSubKeyTree(parent, false); }
     }
+    private static void CheckDarkList(ListBox list)
+    {
+        list.UpdateLayout();
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(list.ActualWidth), (int)Math.Ceiling(list.ActualHeight), 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(list);
+        var pixel = new byte[4];
+        bitmap.CopyPixels(new Int32Rect(8, Math.Min((int)list.ActualHeight - 5, 85), 1, 1), pixel, 4, 0);
+        Check(pixel[3] > 0 && pixel[0] < 90 && pixel[1] < 90 && pixel[2] < 90, "Disabled backup list renders a light system background");
+    }
     private static void SettleSections(InstallerWindow window)
     {
         PumpUntil(() => {
@@ -508,6 +524,14 @@ internal static class InstallerTests
             Equal(status.TranslatePoint(new Point(), window), original);
             Check(Control<Expander>(window, "LogExpander").IsExpanded, "Rapid toggles ended in wrong section");
             controller.Layout(false); SettleSections(window);
+            Control<Expander>(window, "BackupsExpander").IsExpanded = true;
+            controller.Layout(false); SettleSections(window);
+            var list = Control<ListBox>(window, "BackupList");
+            list.SetCurrentValue(UIElement.IsEnabledProperty, false);
+            CheckDarkList(list);
+            list.ClearValue(UIElement.IsEnabledProperty);
+            Control<Expander>(window, "LogExpander").IsExpanded = true;
+            controller.Layout(true); SettleSections(window);
         }
         finally { window.Close(); }
     }
@@ -526,6 +550,7 @@ internal static class InstallerTests
             Click(Control<Button>(window, "DeleteBackup")); Equal(backups.Deleted, 0);
             Equal(Control<Border>(window, "BackupConfirmation").Visibility, Visibility.Visible);
             window.UpdateLayout(); Equal(Control<ListBox>(window, "BackupList").ActualHeight, listHeight);
+            CheckDarkList(Control<ListBox>(window, "BackupList"));
             Capture(window, "backups-confirm", 820, 680, 96);
             Click(Control<Button>(window, "CancelBackup")); Equal(backups.Deleted, 0);
             Click(Control<Button>(window, "RestoreBackup")); Equal(backups.Restored, 0);
@@ -549,7 +574,7 @@ internal static class InstallerTests
             Check(Control<TextBlock>(window, "BackupFeedback").Text.Contains("操作未完成"), "Restore error hidden");
             Capture(window, "backups-error", 820, 680, 96);
         }
-        finally { backups.Gate.Set(); PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled); window.Close(); }
+        finally { backups.Gate.Set(); Click(Control<Button>(window, "CancelBackup")); PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled); window.Close(); }
     }
     private sealed class FakeBackups : IBackupStore
     {
