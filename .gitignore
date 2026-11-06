@@ -140,6 +140,8 @@ packages
 */bin/
 */obj/
 */obj/.nuget/
+**/bin/
+**/obj/
 
 # App settings (user preferences)
 appsettings.json

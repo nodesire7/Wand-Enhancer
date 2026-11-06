@@ -54,7 +54,11 @@ $lines.Add('')
 $lines.Add('同步自 [k1tbyte/Wand-Enhancer](https://github.com/k1tbyte/Wand-Enhancer)，自动合并上游更新并重新应用本分支的品牌信息。')
 $lines.Add('')
 $lines.Add('> 本构建未签名，Windows SmartScreen 可能提示“未知发布者”，选择“更多信息 → 仍要运行”即可。')
-$lines.Add('> 下载后可用 `WandEnhancer.exe.sha256` 校验文件完整性：`certutil -hashfile WandEnhancer.exe SHA256`。')
+$lines.Add('包含支持 CLI 的 `WandEnhancer.exe` 与内置同版 CLI 的 `WandSetup.exe`。')
+$lines.Add('把原版 `Wand-12.68.0.exe` 放到 `WandSetup.exe` 旁边，双击安装助手并点击“安装”。')
+$lines.Add('备份、卸载清理、静默安装、应用修改和启动自动执行。自定义位置或系统级旧版需先手动卸载。')
+$lines.Add('详见 [CLI 与安装说明](https://github.com/nodesire7/Wand-Enhancer/blob/master/Fork/README.md)。')
+$lines.Add('> 下载后可用 `SHA256SUMS.txt` 校验文件完整性：`certutil -hashfile WandSetup.exe SHA256`。')
 
 $text = ($lines -join "`n") + "`n"
 $encoding = New-Object System.Text.UTF8Encoding($false)
