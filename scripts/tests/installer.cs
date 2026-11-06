@@ -1,9 +1,14 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Navigation;
+using System.Windows.Threading;
+using System.Threading;
 using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -321,47 +326,311 @@ internal static class InstallerTests
     private static void TestWindow()
     {
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-        var window = new InstallerWindow();
-        window.Show();
+        SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+        try
+        {
+            var window = new InstallerWindow();
+            window.Show();
+            try
+            {
+                var model = (InstallerViewModel)window.DataContext;
+                Equal(((TextBlock)window.FindName("AuthorText")).Text, "作者  A-FEI-");
+                Equal(((Run)window.FindName("ForumText")).Text, "bbs.gbtgame.me");
+                Equal(((Hyperlink)window.FindName("ForumLink")).NavigateUri.AbsoluteUri, "https://bbs.gbtgame.me/");
+                Check(((ScrollViewer)window.FindName("SettingsScroll")).VerticalScrollBarVisibility == ScrollBarVisibility.Hidden, "Scroll behavior differs from enhancer");
+                var originalPalette = new ResourceDictionary { Source = new Uri("/WandSetup;component/Style/ColorScheme.xaml", UriKind.Relative) };
+                Equal(((SolidColorBrush)window.FindResource("Background")).Color, ((SolidColorBrush)originalPalette["Background"]).Color);
+                Capture(window, "ready", 900, 760, 96);
+                Test("button hover preserves geometry and disabled/pressed styles", () => TestButtonStates(window));
+                model.Begin(); model.Report(3, "正在安装 Wand 12.68.0…"); window.UpdateLayout();
+                Check(!((Button)window.FindName("InstallButton")).IsEnabled, "Busy install button enabled");
+                Check(!((CheckBox)window.FindName("Launch")).IsEnabled, "Busy launch checkbox enabled");
+                window.Close(); Check(window.IsVisible, "Busy window closed");
+                Capture(window, "busy", 960, 720, 96);
+                model.Fail("测试错误：无法写入目标目录。请检查磁盘空间和文件权限，查看日志后重试。\n" + new string('路', 400));
+                Check(((Button)window.FindName("InstallButton")).IsEnabled, "Retry unavailable");
+                ((Expander)window.FindName("LogExpander")).IsExpanded = true;
+                Capture(window, "error-minimum", 820, 680, 96);
+                model.Begin(); model.Succeed(true);
+                ((Expander)window.FindName("LogExpander")).IsExpanded = false;
+                Capture(window, "success", 960, 720, 96);
+                Capture(window, "dpi-125", 900, 760, 120);
+                Capture(window, "dpi-150", 900, 760, 144);
+                Capture(window, "dpi-200", 960, 720, 192);
+            }
+            finally { window.Close(); }
+            Test("all option controls bind, update choices exclude each other, keyboard focus is visible", TestOptionControls);
+            Test("script dialog cancel, multiple, duplicate, invalid, failure and remove buttons", TestScriptControls);
+            Test("install, busy guard, log, backup, forum, failure, retry and finish buttons", TestWorkflowControls);
+            Test("invalid options never create a session and logging errors never crash recovery", TestRecoveryControls);
+            Test("long scripts, scrolling and minimum/maximized layouts keep actions reachable", TestLongContent);
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(null); app.Shutdown(); }
+    }
+
+    private static T Control<T>(InstallerWindow window, string name) where T : class { return (T)window.FindName(name); }
+    private static void Click(ButtonBase button)
+    {
+        typeof(ButtonBase).GetMethod("OnClick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(button, null);
+    }
+    private static void Toggle(InstallerWindow window, string name, bool value)
+    {
+        var box = Control<CheckBox>(window, name);
+        if (box.IsChecked != value) Click(box);
+        Equal(box.IsChecked, (bool?)value);
+    }
+    private static void PumpUntil(Func<bool> done)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        do
+        {
+            Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.ApplicationIdle, new Action(() => {}));
+            if (done()) { Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.ApplicationIdle, new Action(() => {})); return; }
+            Thread.Sleep(10);
+        } while (DateTime.UtcNow < deadline);
+        throw new Exception("UI operation timed out");
+    }
+    private static void TestButtonStates(InstallerWindow window)
+    {
+        var button = Control<Button>(window, "InstallButton");
+        window.UpdateLayout();
+        var before = button.TransformToAncestor(window).TransformBounds(new Rect(button.RenderSize));
+        var hoverKey = (DependencyPropertyKey)typeof(UIElement).GetField("IsMouseOverPropertyKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).GetValue(null);
+        var pressedKey = (DependencyPropertyKey)typeof(ButtonBase).GetField("IsPressedPropertyKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).GetValue(null);
+        try
+        {
+            button.SetValue(hoverKey, true); window.UpdateLayout();
+            Equal(button.TransformToAncestor(window).TransformBounds(new Rect(button.RenderSize)), before);
+            button.SetValue(pressedKey, true); Equal(button.Opacity, 0.75);
+            button.ClearValue(pressedKey); button.IsEnabled = false;
+            Equal(((SolidColorBrush)button.Background).Color, ((SolidColorBrush)window.FindResource("Muted")).Color);
+        }
+        finally { button.ClearValue(hoverKey); button.ClearValue(pressedKey); button.ClearValue(UIElement.IsEnabledProperty); }
+    }
+    private static void TestOptionControls()
+    {
+        var window = new InstallerWindow(new FakeInteraction()); window.Show();
+        try
+        {
+            PumpUntil(() => window.IsLoaded);
+            var model = (InstallerViewModel)window.DataContext;
+            var strategy = Control<ComboBox>(window, "StrategyBox");
+            Check(strategy.IsKeyboardFocusWithin, "Initial keyboard focus missing");
+            Check(strategy.FocusVisualStyle != null, "Strategy keyboard focus invisible");
+            Toggle(window, "ActivateProBox", false); Equal(model.Options.ActivatePro, false);
+            Toggle(window, "ActivateProBox", true); Equal(model.Options.ActivatePro, true);
+            Toggle(window, "DevToolsBox", true); Equal(model.Options.DevTools, true);
+            Toggle(window, "DevToolsBox", false); Equal(model.Options.DevTools, false);
+            Toggle(window, "AutoApplyBox", true); Equal(model.Options.AutoApply, true);
+            Equal(Control<CheckBox>(window, "DisableUpdatesBox").IsChecked, (bool?)false);
+            Toggle(window, "DisableUpdatesBox", true); Equal(model.Options.DisableUpdates, true);
+            Equal(Control<CheckBox>(window, "AutoApplyBox").IsChecked, (bool?)false);
+            Toggle(window, "RemotePanelBox", true); Equal(model.Options.RemotePanel, true);
+            Toggle(window, "RemotePanelBox", false); Equal(model.Options.RemotePanel, false);
+            strategy.SetCurrentValue(Selector.SelectedValueProperty, EPatchStrategy.Supervised);
+            Equal(model.Options.Strategy, EPatchStrategy.Supervised);
+            strategy.SetCurrentValue(Selector.SelectedValueProperty, EPatchStrategy.Static);
+            Equal(model.Options.Strategy, EPatchStrategy.Static);
+            foreach (string name in new[] { "ActivateProBox", "DevToolsBox", "DisableUpdatesBox", "RemotePanelBox", "AutoApplyBox", "Launch" })
+                Check(Control<CheckBox>(window, name).FocusVisualStyle != null, "Missing keyboard outline: " + name);
+            Click(Control<CheckBox>(window, "Launch")); Equal(Control<CheckBox>(window, "Launch").IsChecked, (bool?)false);
+            strategy.Focus(); Check(strategy.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next)), "Tab navigation stuck");
+            Check(Control<CheckBox>(window, "ActivateProBox").IsKeyboardFocused, "Wrong next Tab target");
+            var expander = Control<Expander>(window, "LogExpander"); expander.ApplyTemplate();
+            Click(Descendants(expander).OfType<ToggleButton>().First()); Check(expander.IsExpanded, "Expand log failed");
+            Click(Descendants(expander).OfType<ToggleButton>().First()); Check(!expander.IsExpanded, "Collapse log failed");
+        }
+        finally { window.Close(); }
+    }
+    private static void TestScriptControls()
+    {
+        var ui = new FakeInteraction(); var window = new InstallerWindow(ui); window.Show();
+        string script = Path.Combine(output, "按钮测试 中文.js"); File.WriteAllText(script, "globalThis.uiTest = true;");
+        string second = Path.Combine(output, "第二个脚本.js"); File.WriteAllText(second, "void 0;");
         try
         {
             var model = (InstallerViewModel)window.DataContext;
-            Equal(((TextBlock)window.FindName("AuthorText")).Text, "作者  A-FEI-");
-            Equal(((Run)window.FindName("ForumText")).Text, "bbs.gbtgame.me");
-            Equal(((Hyperlink)window.FindName("ForumLink")).NavigateUri.AbsoluteUri, "https://bbs.gbtgame.me/");
-            Check(((ScrollViewer)window.FindName("SettingsScroll")).VerticalScrollBarVisibility == ScrollBarVisibility.Hidden, "Scroll behavior differs from enhancer");
-            var originalPalette = new ResourceDictionary { Source = new Uri("/WandSetup;component/Style/ColorScheme.xaml", UriKind.Relative) };
-            Equal(((SolidColorBrush)window.FindResource("Background")).Color, ((SolidColorBrush)originalPalette["Background"]).Color);
-            Capture(window, "ready", 960, 720, 96);
-            model.Begin(); model.Report(3, "正在安装 Wand 12.68.0…"); window.UpdateLayout();
-            Check(!((Button)window.FindName("InstallButton")).IsEnabled, "Busy install button enabled");
-            Check(!((CheckBox)window.FindName("Launch")).IsEnabled, "Busy launch checkbox enabled");
-            window.Close(); Check(window.IsVisible, "Busy window closed");
-            Capture(window, "busy", 960, 720, 96);
-            model.Fail("测试错误：无法写入目标目录。请检查磁盘空间和文件权限，查看日志后重试。\n" + new string('路', 400));
-            Check(((Button)window.FindName("InstallButton")).IsEnabled, "Retry unavailable");
-            ((Expander)window.FindName("LogExpander")).IsExpanded = true;
-            Capture(window, "error-minimum", 880, 680, 96);
-            model.Begin(); model.Succeed(true);
-            ((Expander)window.FindName("LogExpander")).IsExpanded = false;
-            Capture(window, "success", 960, 720, 96);
-            Capture(window, "dpi-150", 960, 720, 144);
-            Capture(window, "dpi-200", 960, 720, 192);
+            var add = Control<Button>(window, "AddScriptButton");
+            Click(add); Equal(model.Options.Scripts.Count, 0);
+            ui.Files = new[] { script, second, script }; Click(add); window.UpdateLayout();
+            Equal(model.Options.Scripts.Count, 2); Check(model.Options.RemotePanel, "Script did not enable remote panel");
+            Equal(Control<TextBlock>(window, "NoScriptsText").Visibility, Visibility.Collapsed);
+            ui.Files = new[] { Path.Combine(output, "missing.txt") }; Click(add);
+            Equal(model.Options.Scripts.Count, 2); Check(Control<Expander>(window, "LogExpander").IsExpanded, "Invalid selection hidden");
+            ui.SelectionError = true; Click(add);
+            Check(Control<TextBox>(window, "Details").Text.Contains("dialog unavailable"), "File dialog failure was not shown");
+            var remove = Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().First();
+            Equal(System.Windows.Automation.AutomationProperties.GetName(remove), "移除脚本 " + Path.GetFileName(script));
+            Click(remove); window.UpdateLayout(); Equal(model.Options.Scripts.Count, 1);
+            Click(Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().Single()); window.UpdateLayout();
+            Equal(model.Options.Scripts.Count, 0);
+            Equal(Control<TextBlock>(window, "NoScriptsText").Visibility, Visibility.Visible);
+            Check(File.Exists(script), "Remove button deleted the original file");
         }
-        finally { window.Close(); app.Shutdown(); }
+        finally { window.Close(); }
+    }
+    private static void TestWorkflowControls()
+    {
+        var ui = new FakeInteraction { Hold = true, Fail = true }; var window = new InstallerWindow(ui); window.Show();
+        var model = (InstallerViewModel)window.DataContext;
+        try
+        {
+            Toggle(window, "Launch", false);
+            ui.Files = new[] { Path.Combine(output, "busy-script.js") }; File.WriteAllText(ui.Files[0], "void 0;");
+            Click(Control<Button>(window, "AddScriptButton")); window.UpdateLayout();
+            var remove = Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().Single();
+            Click(Control<Button>(window, "InstallButton"));
+            PumpUntil(() => ui.Session != null && ui.Session.Started);
+            Check(model.IsBusy, "Install did not enter busy state");
+            foreach (string name in new[] { "InstallButton", "Launch", "OptionsEditor", "AddScriptButton" })
+                Check(!Control<UIElement>(window, name).IsEnabled, "Busy control enabled: " + name);
+            Click(Control<Button>(window, "InstallButton")); Equal(ui.Created, 1);
+            Click(Control<Button>(window, "AddScriptButton")); Equal(ui.Selected, 1);
+            Click(remove); Equal(model.Options.Scripts.Count, 1);
+            Equal(ui.Config.CustomScriptPaths.Single(), ui.Files.Single());
+            window.Close(); Check(window.IsVisible, "Close interrupted an active installation");
+            Capture(window, "buttons-busy", 820, 680, 96);
+            ui.Session.Gate.Set(); PumpUntil(() => model.State == "Error" && ui.Session.Disposed);
+            Check(ui.Session.FailureRecorded, "Failure not recorded");
+            Equal(Control<Button>(window, "InstallButton").Content, "重试安装");
+            Check(Control<Expander>(window, "LogExpander").IsExpanded, "Failure logs not expanded");
+            foreach (string name in new[] { "OpenLog", "OpenBackup" })
+            {
+                Equal(Control<Button>(window, name).Visibility, Visibility.Visible);
+                Click(Control<Button>(window, name));
+            }
+            Equal(ui.Opened[0], ui.Session.LogPath); Equal(ui.Opened[1], ui.Session.BackupPath);
+            var forum = Control<Hyperlink>(window, "ForumLink");
+            var navigate = new RequestNavigateEventArgs(forum.NavigateUri, "") { RoutedEvent = Hyperlink.RequestNavigateEvent };
+            forum.RaiseEvent(navigate); Check(navigate.Handled, "Forum event not handled"); Equal(ui.Opened.Last(), "https://bbs.gbtgame.me/");
+            Control<ScrollViewer>(window, "SettingsScroll").ScrollToTop(); window.UpdateLayout();
+            ui.OpenError = true; Click(Control<Button>(window, "OpenLog"));
+            Check(Control<TextBox>(window, "Details").Text.Contains("无法打开："), "Open failure invisible"); ui.OpenError = false;
+            Capture(window, "buttons-error", 820, 680, 96);
+            var logBounds = Control<TextBox>(window, "Details").TransformToAncestor(Control<ScrollViewer>(window, "SettingsScroll")).TransformBounds(new Rect(Control<TextBox>(window, "Details").RenderSize));
+            Check(logBounds.Top >= 0 && logBounds.Bottom <= Control<ScrollViewer>(window, "SettingsScroll").ViewportHeight + 1, "Expanded failure log was left outside the viewport");
+            ui.Hold = true; ui.Fail = false;
+            Click(Control<Button>(window, "InstallButton")); Equal(ui.Created, 2);
+            Equal(Control<Button>(window, "OpenLog").Visibility, Visibility.Collapsed);
+            Equal(Control<Button>(window, "OpenBackup").Visibility, Visibility.Collapsed);
+            ui.Session.Gate.Set(); PumpUntil(() => model.State == "Success" && ui.Session.Disposed);
+            Check(!ui.Session.Launched, "Launch opt-out was lost"); Equal(model.Stages[5].State, "已跳过");
+            Check(!Control<UIElement>(window, "OptionsEditor").IsEnabled, "Success options remained editable");
+            Capture(window, "buttons-success", 820, 680, 96);
+            Click(Control<Button>(window, "InstallButton")); Check(!window.IsVisible, "Finish did not close the window"); Equal(ui.Created, 2);
+        }
+        finally { if (ui.Session != null && !ui.Session.Disposed) ui.Session.Gate.Set(); PumpUntil(() => !model.IsBusy); window.Close(); }
+    }
+    private static void TestRecoveryControls()
+    {
+        var ui = new FakeInteraction { Fail = true, LogError = true }; var window = new InstallerWindow(ui); window.Show();
+        var model = (InstallerViewModel)window.DataContext;
+        try
+        {
+            Toggle(window, "ActivateProBox", false); Toggle(window, "DisableUpdatesBox", false);
+            Click(Control<Button>(window, "InstallButton")); Equal(model.State, "Error"); Equal(ui.Created, 0);
+            Check(Control<TextBox>(window, "Details").Text.Length > 0, "Invalid options produced no guidance");
+            Toggle(window, "DevToolsBox", true);
+            Click(Control<Button>(window, "InstallButton")); PumpUntil(() => model.State == "Error" && ui.Session.Disposed);
+            Check(model.Message.Contains("fixture install failure"), "Log failure replaced the actual installation error");
+            Check(Control<TextBox>(window, "Details").Text.Contains("无法保存错误日志："), "Write failure not handled");
+            Check(Control<TextBox>(window, "Details").Text.Contains("无法关闭日志："), "Dispose failure not handled");
+            ui.Fail = false; ui.LogError = false;
+            Click(Control<Button>(window, "InstallButton")); PumpUntil(() => model.State == "Success" && ui.Session.Disposed);
+            Check(ui.Session.Launched, "Default launch choice was lost");
+            Check(ui.Config.PatchTypes.SetEquals(new[] { EPatchType.DevToolsOnF12 }), "GUI choices lost at session boundary");
+        }
+        finally { PumpUntil(() => !model.IsBusy); window.Close(); }
+    }
+    private static void TestLongContent()
+    {
+        var window = new InstallerWindow(new FakeInteraction()); window.Show();
+        try
+        {
+            var model = (InstallerViewModel)window.DataContext;
+            for (int i = 0; i < 18; i++)
+            {
+                string script = Path.Combine(output, "很长的自定义脚本名称_" + new string('测', 70) + i + ".js");
+                File.WriteAllText(script, "void 0;"); model.Options.AddScript(script);
+            }
+            Control<Expander>(window, "LogExpander").IsExpanded = true;
+            Control<TextBox>(window, "Details").Text = string.Join("\n", Enumerable.Repeat("用于检查滚动和长日志显示的测试记录。", 100));
+            Capture(window, "long-content-minimum", 820, 680, 96);
+            var scripts = Control<ScrollViewer>(window, "ScriptScroll"); var settings = Control<ScrollViewer>(window, "SettingsScroll");
+            Check(scripts.ScrollableHeight > 0 && settings.ScrollableHeight > 0, "Long content cannot scroll");
+            scripts.ScrollToEnd(); settings.ScrollToEnd(); window.UpdateLayout();
+            Check(scripts.VerticalOffset > 0 && settings.VerticalOffset > 0, "Hidden scrollbar also disabled scrolling");
+            Check(Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().All(b => b.ActualWidth >= 36), "Long filename squeezed remove controls");
+            Capture(window, "long-content-scrolled", 820, 680, 96);
+            window.WindowState = WindowState.Maximized; window.UpdateLayout();
+            Check(Control<Button>(window, "InstallButton").ActualWidth >= 118, "Maximized action collapsed");
+            window.WindowState = WindowState.Normal;
+        }
+        finally { window.Close(); }
+    }
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i); yield return child;
+            foreach (var nested in Descendants(child)) yield return nested;
+        }
+    }
+    private sealed class FakeInteraction : IInstallerInteraction
+    {
+        public string[] Files = new string[0];
+        public bool SelectionError, OpenError, Hold, Fail, LogError;
+        public int Created, Selected;
+        public PatchConfig Config;
+        public FakeSession Session;
+        public List<string> Opened = new List<string>();
+        public string[] SelectScripts(Window owner) { Selected++; if (SelectionError) throw new IOException("dialog unavailable"); return Files; }
+        public void Open(string path) { if (OpenError) throw new IOException("file association unavailable"); Opened.Add(path); }
+        public IInstallerSession CreateSession(Action<int, string> report, PatchConfig config)
+        {
+            Created++; Config = config; Session = new FakeSession(report, Hold, Fail, LogError); return Session;
+        }
+    }
+    private sealed class FakeSession : IInstallerSession
+    {
+        private readonly Action<int, string> report;
+        private readonly bool fail, logError;
+        public readonly ManualResetEventSlim Gate = new ManualResetEventSlim(false);
+        public volatile bool Started;
+        public bool Disposed, FailureRecorded, Launched;
+        public string LogPath { get; private set; }
+        public string BackupPath { get; private set; }
+        public FakeSession(Action<int, string> report, bool hold, bool fail, bool logError)
+        {
+            this.report = report; this.fail = fail; this.logError = logError;
+            BackupPath = Path.Combine(output, "fake-backup"); Directory.CreateDirectory(BackupPath);
+            LogPath = Path.Combine(BackupPath, "fixture.log"); File.WriteAllText(LogPath, "fixture only");
+            if (!hold) Gate.Set();
+        }
+        public void Install(bool launch)
+        {
+            Started = true; Launched = launch; report(3, "测试安装进度，不会改动真实应用。");
+            if (!Gate.Wait(10000)) throw new TimeoutException("Fixture release timed out");
+            if (fail) throw new IOException("fixture install failure");
+            report(6, "测试安装完成。");
+        }
+        public void RecordFailure(Exception error) { FailureRecorded = true; if (logError) throw new IOException("fixture log write failure"); }
+        public void Dispose() { Disposed = true; Gate.Dispose(); if (logError) throw new IOException("fixture log close failure"); }
     }
 
     private static void Capture(InstallerWindow window, string name, double width, double height, double dpi)
     {
         window.Width = width; window.Height = height; window.UpdateLayout();
+        window.Dispatcher.Invoke(DispatcherPriority.ApplicationIdle, new Action(() => {}));
         window.Dispatcher.Invoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() => {}));
         window.UpdateLayout();
         var message = (TextBlock)window.FindName("MessageText");
         Check(((FrameworkElement)window.FindName("StatusPanel")).ActualHeight < 145, "Status block is too large: " + name);
         Check(message.ActualHeight >= 15, "Status message lost its layout space: " + name);
-        foreach (string controlName in new[] { "InstallButton", "Launch", "AuthorText" })
+        foreach (string controlName in new[] { "InstallButton", "Launch", "AuthorText", "StatusPanel", "SettingsScroll", "OpenLog", "OpenBackup" })
         {
             var control = (FrameworkElement)window.FindName(controlName);
+            if (control.Visibility != Visibility.Visible) continue;
             var point = control.TranslatePoint(new Point(), window);
             Check(control.ActualWidth > 0 && control.ActualHeight > 0 && point.X >= 0 && point.Y >= 0 && point.X + control.ActualWidth <= window.ActualWidth && point.Y + control.ActualHeight <= window.ActualHeight, "Control clipped: " + name + "/" + controlName);
         }

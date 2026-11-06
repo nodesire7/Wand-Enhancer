@@ -21,7 +21,7 @@ namespace WandEnhancer.Fork.Installer
         public string arguments { get; set; }
     }
 
-    internal sealed class InstallEngine : IDisposable, IInstallSteps
+    internal sealed class InstallEngine : IInstallerSession, IInstallSteps
     {
         internal static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 64 * 1024 * 1024 };
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall";

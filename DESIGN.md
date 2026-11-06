@@ -8,4 +8,6 @@ The status block is a compact automatic-height strip, capped by validation below
 
 Buttons, the launch check box and execution-record toggle use consistent focus outlines and hover/disabled feedback. The launch preference starts checked. During execution, duplicate activation and closing are prevented. Failure retains the current step, reason and retry action; success labels all completed stages and identifies a skipped launch. Status text remains visible at the minimum window size, even with logs expanded, and exposes its actual message to accessibility tools. No decorative motion is needed.
 
-Validated states include default, busy, long failure, success, 880×680 minimum size, and 150%/200% render scaling. Standalone-process smoke testing complements view construction to exercise WPF's asynchronous dispatcher startup.
+Validated states include default, busy, long failure, success, 820×680 minimum size, long script lists and logs, and 125%/150%/200% render scaling. Standalone-process smoke testing complements view construction to exercise WPF's asynchronous dispatcher startup.
+
+The first focus target is the strategy picker. Keyboard focus uses palette-based outlines, primary-button hover preserves geometry, and expanding execution records scrolls the log into view. File-picker and log-writing errors remain in the window and do not interrupt recovery. UI regression tests inject only native interactions and installation sessions; production retains the actual file dialog, shell opener and installation engine.

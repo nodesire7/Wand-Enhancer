@@ -1,4 +1,4 @@
-<Window x:Class="WandEnhancer.Fork.Installer.InstallerWindow" x:ClassModifier="internal"
+﻿<Window x:Class="WandEnhancer.Fork.Installer.InstallerWindow" x:ClassModifier="internal"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:models="clr-namespace:WandEnhancer.Models"
@@ -12,23 +12,39 @@
                 <ResourceDictionary Source="Style/ColorScheme.xaml" />
                 <ResourceDictionary Source="Style/Styles.xaml" />
             </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="KeyboardFocus" TargetType="Control">
+                <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Control"><Rectangle Margin="-3" Stroke="{DynamicResource Ring}" StrokeThickness="1" RadiusX="3" RadiusY="3" /></ControlTemplate></Setter.Value></Setter>
+            </Style>
+            <Style x:Key="InstallerCombo" TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}" />
+            </Style>
+            <Style TargetType="Hyperlink">
+                <Setter Property="Foreground" Value="{DynamicResource MutedForeground}" />
+                <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource Foreground}" /></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="Foreground" Value="{DynamicResource Foreground}" /></Trigger></Style.Triggers>
+            </Style>
             <Style x:Key="InstallerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                 <Setter Property="Padding" Value="10,5" />
                 <Style.Triggers>
+                    <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.75" /></Trigger>
                     <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5" /></Trigger>
                     <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Ring}" /></Trigger>
                 </Style.Triggers>
             </Style>
             <Style x:Key="InstallerPrimaryButton" TargetType="Button" BasedOn="{StaticResource ColoredButton}">
                 <Setter Property="Padding" Value="22,8" />
-                <Style.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Ring}" /></Trigger></Style.Triggers>
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter Property="Margin" Value="0" /></Trigger>
+                    <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.75" /></Trigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter Property="Background" Value="{DynamicResource Muted}" /><Setter Property="Foreground" Value="{DynamicResource MutedForeground}" /></Trigger>
+                    <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Ring}" /></Trigger>
+                </Style.Triggers>
             </Style>
             <Style x:Key="OptionCheck" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
                 <Setter Property="HorizontalAlignment" Value="Right" />
                 <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}" />
                 <Style.Triggers>
                     <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
-                    <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="Effect"><Setter.Value><DropShadowEffect BlurRadius="3" ShadowDepth="0" Color="#D4D4D8" /></Setter.Value></Setter></Trigger>
                 </Style.Triggers>
             </Style>
             <Style TargetType="ProgressBar">
@@ -40,7 +56,7 @@
             <Style TargetType="Expander">
                 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Expander">
                     <StackPanel>
-                        <ToggleButton Content="{TemplateBinding Header}" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Left" Cursor="Hand">
+                        <ToggleButton Content="{TemplateBinding Header}" FocusVisualStyle="{StaticResource KeyboardFocus}" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Left" Cursor="Hand">
                             <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border BorderBrush="{DynamicResource Border}" BorderThickness="0" Padding="0,6">
                                 <StackPanel Orientation="Horizontal"><Path x:Name="Chevron" Data="M 1,1 L 5,5 L 9,1" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5" Width="10" Height="6" Margin="0,0,8,0" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5" /><ContentPresenter /></StackPanel>
                             </Border><ControlTemplate.Triggers><Trigger Property="IsChecked" Value="True"><Setter TargetName="Chevron" Property="RenderTransform"><Setter.Value><RotateTransform Angle="180" /></Setter.Value></Setter></Trigger></ControlTemplate.Triggers></ControlTemplate></ToggleButton.Template>
@@ -74,7 +90,7 @@
                         </DataTemplate.Triggers>
                     </DataTemplate></ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <StackPanel Grid.Row="2"><TextBlock x:Name="AuthorText" FontSize="11" /><TextBlock Margin="0,8,0,0" FontSize="11"><Hyperlink x:Name="ForumLink" Foreground="{DynamicResource MutedForeground}" RequestNavigate="ForumNavigate"><Run x:Name="ForumText" /></Hyperlink></TextBlock></StackPanel>
+                <StackPanel Grid.Row="2"><TextBlock x:Name="AuthorText" FontSize="11" /><TextBlock Margin="0,8,0,0" FontSize="11"><Hyperlink x:Name="ForumLink" RequestNavigate="ForumNavigate"><Run x:Name="ForumText" /></Hyperlink></TextBlock></StackPanel>
             </Grid>
         </Border>
         <Grid Grid.Column="1" Margin="25,23,25,20">
@@ -87,29 +103,29 @@
                     <ProgressBar Value="{Binding Progress, Mode=OneWay}" Minimum="0" Maximum="6" AutomationProperties.Name="安装进度" />
                 </StackPanel>
             </Border>
-            <ScrollViewer Grid.Row="2" x:Name="SettingsScroll" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False">
+            <ScrollViewer Grid.Row="2" x:Name="SettingsScroll" Focusable="False" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False">
                 <StackPanel>
                     <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="3" Padding="14" x:Name="OptionsEditor" DataContext="{Binding Options}">
                         <StackPanel>
                             <TextBlock Text="我们要增强什么？" FontWeight="SemiBold" Margin="0,0,0,13" />
-                            <Grid Margin="0,0,0,9"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="200" /></Grid.ColumnDefinitions><TextBlock Text="补丁方式" VerticalAlignment="Center" /><ComboBox x:Name="StrategyBox" Grid.Column="1" SelectedValuePath="Tag" SelectedValue="{Binding Strategy, Mode=TwoWay}" AutomationProperties.Name="补丁方式" ToolTip="Static 修改磁盘文件；Supervised 在每次启动时于内存中应用修改。"><ComboBoxItem Tag="{x:Static models:EPatchStrategy.Static}" Content="Static (推荐)" /><ComboBoxItem Tag="{x:Static models:EPatchStrategy.Supervised}" Content="Supervised" /></ComboBox></Grid>
+                            <Grid Margin="0,0,0,9"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="200" /></Grid.ColumnDefinitions><TextBlock Text="补丁方式" VerticalAlignment="Center" /><ComboBox x:Name="StrategyBox" Style="{StaticResource InstallerCombo}" Grid.Column="1" SelectedValuePath="Tag" SelectedValue="{Binding Strategy, Mode=TwoWay}" AutomationProperties.Name="补丁方式" ToolTip="Static 修改磁盘文件；Supervised 在每次启动时于内存中应用修改。"><ComboBoxItem Tag="{x:Static models:EPatchStrategy.Static}" Content="Static (推荐)" /><ComboBoxItem Tag="{x:Static models:EPatchStrategy.Supervised}" Content="Supervised" /></ComboBox></Grid>
                             <Grid><Grid.RowDefinitions><RowDefinition Height="28" /><RowDefinition Height="28" /><RowDefinition Height="28" /><RowDefinition Height="28" /><RowDefinition Height="28" /></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="28" /></Grid.ColumnDefinitions>
                                 <TextBlock Text="激活 WeMod Pro" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox x:Name="ActivateProBox" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding ActivatePro, Mode=TwoWay}" AutomationProperties.Name="激活 WeMod Pro" />
-                                <TextBlock Grid.Row="1" Text="按 F12 打开开发者工具" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox Grid.Row="1" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding DevTools, Mode=TwoWay}" AutomationProperties.Name="按 F12 打开开发者工具" />
-                                <TextBlock Grid.Row="2" Text="禁用更新" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox Grid.Row="2" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding DisableUpdates, Mode=TwoWay}" AutomationProperties.Name="禁用更新" ToolTip="启用后不检查 Wand 更新，同时关闭更新后自动应用。" />
-                                <TextBlock Grid.Row="3" Text="启用远程访问（beta）" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox Grid.Row="3" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding RemotePanel, Mode=TwoWay}" AutomationProperties.Name="启用远程访问" />
-                                <TextBlock Grid.Row="4" Text="更新后自动应用" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox Grid.Row="4" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding AutoApply, Mode=TwoWay}" AutomationProperties.Name="更新后自动应用" ToolTip="需要允许 Wand 更新，启用后会取消禁用更新。" />
+                                <TextBlock Grid.Row="1" Text="按 F12 打开开发者工具" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox x:Name="DevToolsBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding DevTools, Mode=TwoWay}" AutomationProperties.Name="按 F12 打开开发者工具" />
+                                <TextBlock Grid.Row="2" Text="禁用更新" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox x:Name="DisableUpdatesBox" Grid.Row="2" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding DisableUpdates, Mode=TwoWay}" AutomationProperties.Name="禁用更新" ToolTip="启用后不检查 Wand 更新，同时关闭更新后自动应用。" />
+                                <TextBlock Grid.Row="3" Text="启用远程访问（beta）" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox x:Name="RemotePanelBox" Grid.Row="3" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding RemotePanel, Mode=TwoWay}" AutomationProperties.Name="启用远程访问" />
+                                <TextBlock Grid.Row="4" Text="更新后自动应用" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox x:Name="AutoApplyBox" Grid.Row="4" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding AutoApply, Mode=TwoWay}" AutomationProperties.Name="更新后自动应用" ToolTip="需要允许 Wand 更新，启用后会取消禁用更新。" />
                             </Grid>
                             <Border Margin="0,12,0,0" Padding="10" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="3" Background="{DynamicResource Muted}">
-                                <StackPanel><DockPanel LastChildFill="False"><TextBlock Text="自定义脚本" VerticalAlignment="Center" /><Button DockPanel.Dock="Right" Content="添加 .js" Click="AddScriptClick" Style="{StaticResource InstallerButton}" /></DockPanel>
+                                <StackPanel><DockPanel LastChildFill="False"><TextBlock Text="自定义脚本" VerticalAlignment="Center" /><Button x:Name="AddScriptButton" DockPanel.Dock="Right" Content="添加 .js" Click="AddScriptClick" Style="{StaticResource InstallerButton}" /></DockPanel>
                                     <TextBlock Text="选中的 .js 文件会打包到 Wand 并在渲染器中加载。" FontSize="11" Foreground="{DynamicResource MutedForeground}" TextWrapping="Wrap" Margin="0,7,0,4" />
-                                    <ScrollViewer MaxHeight="82" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled"><ItemsControl ItemsSource="{Binding Scripts}"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,4,0,0" LastChildFill="True"><Button DockPanel.Dock="Right" Tag="{Binding}" Content="移除" Click="RemoveScriptClick" Style="{StaticResource InstallerButton}" Padding="7,2" FontSize="11" /><TextBlock Text="{Binding FileName}" ToolTip="{Binding FullPath}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource MutedForeground}" /></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
-                                    <TextBlock Text="未选择脚本" FontSize="11" Foreground="{DynamicResource MutedForeground}"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding HasScripts}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+                                    <ScrollViewer x:Name="ScriptScroll" Focusable="False" MaxHeight="82" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled"><ItemsControl x:Name="ScriptList" ItemsSource="{Binding Scripts}"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,4,0,0" LastChildFill="True"><Button DockPanel.Dock="Right" Tag="{Binding}" Content="移除" AutomationProperties.Name="{Binding FileName, StringFormat=移除脚本 {0}}" Click="RemoveScriptClick" Style="{StaticResource InstallerButton}" Padding="7,2" FontSize="11" /><TextBlock Text="{Binding FileName}" ToolTip="{Binding FullPath}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource MutedForeground}" /></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
+                                    <TextBlock x:Name="NoScriptsText" Text="未选择脚本" FontSize="11" Foreground="{DynamicResource MutedForeground}"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding HasScripts}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
                     </Border>
-                    <Expander x:Name="LogExpander" Header="本次执行记录" Foreground="{DynamicResource MutedForeground}" Margin="0,10,0,8" FontSize="11">
+                    <Expander x:Name="LogExpander" Expanded="LogExpanded" Header="本次执行记录" Foreground="{DynamicResource MutedForeground}" Margin="0,10,0,8" FontSize="11">
                         <TextBox x:Name="Details" Height="115" Margin="0,5,0,0" Padding="9" Background="{DynamicResource Muted}" Foreground="{DynamicResource MutedForeground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="安装日志" />
                     </Expander>
                 </StackPanel>

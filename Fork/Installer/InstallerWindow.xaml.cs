@@ -1,6 +1,5 @@
-using System;
+﻿using System;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -8,8 +7,8 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Navigation;
+using System.Windows.Threading;
 using WandEnhancer.Branding;
-using Microsoft.Win32;
 using System.Windows.Controls;
 
 namespace WandEnhancer.Fork.Installer
@@ -18,11 +17,15 @@ namespace WandEnhancer.Fork.Installer
     {
         [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr handle, int attribute, ref int value, int size);
         private readonly InstallerViewModel model;
+        private readonly IInstallerInteraction interaction;
         private string logPath;
         private string backupPath;
 
-        public InstallerWindow()
+        public InstallerWindow() : this(new NativeInstallerInteraction()) { }
+
+        internal InstallerWindow(IInstallerInteraction interaction)
         {
+            this.interaction = interaction ?? throw new ArgumentNullException(nameof(interaction));
             InitializeComponent();
             model = new InstallerViewModel(InstallEngine.LoadPackage().version);
             DataContext = model;
@@ -31,6 +34,7 @@ namespace WandEnhancer.Fork.Installer
             ForumLink.NavigateUri = new Uri(BrandingInfo.ForumUrl.ToLowerInvariant());
             model.PropertyChanged += ModelChanged;
             Closing += OnClosing;
+            Loaded += (sender, args) => StrategyBox.Focus();
             SourceInitialized += (sender, args) =>
             {
                 int dark = 1;
@@ -55,11 +59,11 @@ namespace WandEnhancer.Fork.Installer
             Details.Clear();
             OpenLog.Visibility = OpenBackup.Visibility = Visibility.Collapsed;
             bool launch = Launch.IsChecked == true;
-            InstallEngine engine = null;
+            IInstallerSession engine = null;
             try
             {
                 var config = model.Options.Snapshot();
-                engine = new InstallEngine((step, text) => Dispatcher.Invoke(() =>
+                engine = interaction.CreateSession((step, text) => Dispatcher.Invoke(() =>
                 {
                     model.Report(step, text);
                     AppendLog(text);
@@ -69,16 +73,18 @@ namespace WandEnhancer.Fork.Installer
             }
             catch (Exception error)
             {
-                engine?.RecordFailure(error);
+                try { engine?.RecordFailure(error); }
+                catch (Exception logError) { AppendLog("无法保存错误日志：" + logError.Message); }
                 model.Fail(error.Message);
                 AppendLog("安装已停止：" + error.Message);
-                LogExpander.IsExpanded = true;
+                ShowLog();
             }
             finally
             {
                 logPath = engine?.LogPath;
                 backupPath = engine?.BackupPath;
-                engine?.Dispose();
+                try { engine?.Dispose(); }
+                catch (Exception logError) { AppendLog("无法关闭日志：" + logError.Message); ShowLog(); }
                 OpenLog.Visibility = File.Exists(logPath) ? Visibility.Visible : Visibility.Collapsed;
                 OpenBackup.Visibility = Directory.Exists(backupPath) ? Visibility.Visible : Visibility.Collapsed;
             }
@@ -88,6 +94,22 @@ namespace WandEnhancer.Fork.Installer
         {
             Details.AppendText(DateTime.Now.ToString("HH:mm:ss") + "  " + text + Environment.NewLine);
             Details.ScrollToEnd();
+        }
+
+        private void ShowLog()
+        {
+            if (LogExpander.IsExpanded) RevealLog();
+            else LogExpander.IsExpanded = true;
+        }
+
+        private void LogExpanded(object sender, RoutedEventArgs args) => RevealLog();
+
+        private void RevealLog()
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            {
+                if (LogExpander.IsExpanded) Details.BringIntoView();
+            }));
         }
 
         private void OnClosing(object sender, CancelEventArgs args)
@@ -103,22 +125,22 @@ namespace WandEnhancer.Fork.Installer
 
         private void AddScriptClick(object sender, RoutedEventArgs args)
         {
-            var dialog = new OpenFileDialog { Filter = "JavaScript 文件 (*.js)|*.js", Multiselect = true, CheckFileExists = true };
-            if (dialog.ShowDialog(this) != true) return;
-            try { foreach (string path in dialog.FileNames) model.Options.AddScript(path); }
-            catch (Exception error) { AppendLog(error.Message); LogExpander.IsExpanded = true; }
+            if (!OptionsEditor.IsEnabled) return;
+            try { foreach (string path in interaction.SelectScripts(this)) model.Options.AddScript(path); }
+            catch (Exception error) { AppendLog("无法添加脚本：" + error.Message); ShowLog(); }
         }
 
         private void RemoveScriptClick(object sender, RoutedEventArgs args)
         {
+            if (!OptionsEditor.IsEnabled) return;
             var script = (sender as Button)?.Tag as SelectedScript;
             if (script != null) model.Options.Scripts.Remove(script);
         }
 
         private void Open(string path)
         {
-            try { if (!string.IsNullOrEmpty(path)) Process.Start(new ProcessStartInfo(path) { UseShellExecute = true })?.Dispose(); }
-            catch (Exception error) { AppendLog("无法打开：" + error.Message); LogExpander.IsExpanded = true; }
+            try { if (!string.IsNullOrEmpty(path)) interaction.Open(path); }
+            catch (Exception error) { AppendLog("无法打开：" + error.Message); ShowLog(); }
         }
     }
 }

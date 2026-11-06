@@ -1,4 +1,4 @@
-# GBTGAME CLI 与一键安装
+﻿# GBTGAME CLI 与一键安装
 
 用户交付文件只有 `WandSetup.exe`，已内置同一次构建的增强器与 CLI；完整离线版还内置 Wand 12.68.0 安装包。无需同目录的 WandEnhancer.exe，`WandSetup.exe --cli ...` 可直接使用内置 CLI。增强器版本来自上游 AssemblyVersion；JSON 同时返回源码构建号 `build`，CLI 协议版本为 `1`。
 
@@ -88,7 +88,7 @@ WandSetup.exe --cli patch --path "C:\Users\name\AppData\Local\Wand" --config opt
 
 ## 隔离验收与完整测试
 
-`test-installer.ps1` 检查 24 组安装编排、失败拦截、参数快照、脚本缓存和持久化、配置传递、更新监控进程输出隔离、静默移除、快捷方式、独立启动及窗口状态；另验证单独 EXE 在空目录调用内置 CLI、轻量版缺失／损坏载荷和进程互斥。窗口测试检查共享调色板、隐藏滚动条、紧凑状态区、最小尺寸与 150% / 200% 渲染。
+`test-installer.ps1` 检查 30 组安装编排、失败拦截、参数快照、脚本缓存和持久化、配置传递、更新监控进程输出隔离、静默移除、快捷方式、独立启动及窗口状态；另验证单独 EXE 在空目录调用内置 CLI、轻量版缺失／损坏载荷和进程互斥。窗口测试检查共享调色板、隐藏滚动条、紧凑状态区、820×680 最小尺寸与 125% / 150% / 200% 渲染。按钮测试触发真实窗口事件处理器，用假安装会话验证运行中保护、错误恢复与成功关闭，不运行真实安装。逐项记录见 [UI-TEST-REPORT.md](UI-TEST-REPORT.md)。运行这些检查前需关闭安装助手窗口，避免占用进程互斥锁。
 
 `test-real-package.ps1 -BundleDirectory <原版 app 目录>` 只操作复制到临时目录的副本，覆盖 Static / Supervised 两种策略、四项补丁、JavaScript 和远程桥语法，以及恢复后的全部文件哈希。不要把专有解包文件提交到仓库。
 
