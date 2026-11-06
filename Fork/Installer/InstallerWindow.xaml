@@ -88,7 +88,6 @@
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,35">
-                    <Image Source="Assets/appicon.ico" Width="34" Height="34" Margin="0,0,12,0" />
                     <StackPanel VerticalAlignment="Center"><TextBlock Text="GBTGAME" FontWeight="Bold" FontSize="17" /><TextBlock Text="Wand 安装助手" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,3,0,0" /></StackPanel>
                 </StackPanel>
                 <ItemsControl Grid.Row="1" ItemsSource="{Binding Stages}" VerticalAlignment="Top" AutomationProperties.Name="安装步骤">

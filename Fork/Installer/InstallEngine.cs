@@ -204,6 +204,10 @@ namespace WandEnhancer.Fork.Installer
                         }
                         using (var run = root.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
                             File.WriteAllText(Path.Combine(backup, brand + "-" + view + "-startup.json"), Json.Serialize(StartupValues(run, Path.Combine(local, brand))));
+                        int protocol = 0;
+                        foreach (string key in UserShellCleanup.AssociatedProtocolKeys(root, Path.Combine(local, brand)))
+                            using (var entry = root.OpenSubKey(key))
+                                File.WriteAllText(Path.Combine(backup, brand + "-" + view + "-protocol-" + protocol++ + ".json"), Json.Serialize(Snapshot(entry)));
                     }
             }
             File.WriteAllText(Path.Combine(backup, "说明.txt"), "此目录保存安装前的 Roaming 配置和相关 HKCU 注册表快照（含值类型）。日志位于相邻 logs 目录。旧安装程序文件不在备份内。注册表 JSON 仅供人工检查和恢复。\r\n");
@@ -244,20 +248,18 @@ namespace WandEnhancer.Fork.Installer
 
         private void RemoveOld(string brand)
         {
+            SilentRemoval.Remove(local, roaming, brand, StopUnder,
+                () => UserShellCleanup.RemoveShortcuts(Path.Combine(local, brand), Path.Combine(backup, "Shortcuts", brand)),
+                () => CleanRegistry(brand));
+        }
+
+        private void CleanRegistry(string brand)
+        {
             string root = Path.Combine(local, brand);
-            string updater = Path.Combine(root, "Update.exe");
-            StopUnder(root);
-            if (File.Exists(updater)) Run(updater, "--uninstall --silent", 300000);
-            StopUnder(root);
-            foreach (string parent in new[] { local, roaming })
-            {
-                string path = Path.Combine(parent, brand);
-                GuardTree(path, parent, brand);
-                if (Directory.Exists(path)) Retry(() => Directory.Delete(path, true));
-            }
             foreach (RegistryView view in new[] { RegistryView.Registry32, RegistryView.Registry64 })
                 using (var registry = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, view))
                 {
+                    foreach (string key in UserShellCleanup.AssociatedProtocolKeys(registry, root).ToArray()) registry.DeleteSubKeyTree(key, false);
                     registry.DeleteSubKeyTree(@"Software\" + brand, false);
                     registry.DeleteSubKeyTree(UninstallKey + "\\" + brand, false);
                     using (var run = registry.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
@@ -373,13 +375,6 @@ namespace WandEnhancer.Fork.Installer
             Directory.CreateDirectory(destination);
             foreach (string file in Directory.GetFiles(source)) File.Copy(file, Path.Combine(destination, Path.GetFileName(file)));
             foreach (string directory in Directory.GetDirectories(source)) CopyTree(directory, Path.Combine(destination, Path.GetFileName(directory)));
-        }
-
-        private static void Retry(Action action)
-        {
-            for (int i = 0; ; i++)
-                try { action(); return; }
-                catch (IOException) when (i < 5) { Thread.Sleep(500); }
         }
 
         public void Dispose()

@@ -2,7 +2,7 @@
 
 Scope: `Fork/Installer/InstallerWindow.xaml`, Windows desktop, operate mode.
 
-The WPF utility preserves the enhancer's dark palette and GBTGAME identity. A slate sidebar separates six sequential installation steps from the main task. Mint indicates the active action and completed work; warm red identifies a failed step. Microsoft YaHei UI follows the Windows desktop environment. Native window chrome retains resizing and window management, with a dark title bar on supported Windows versions.
+The WPF utility preserves the enhancer's dark palette and GBTGAME identity. A slate sidebar separates six sequential installation steps from the main task. The sidebar uses the GBTGAME name without repeating the native title-bar logo. Mint indicates the active action and completed work; warm red identifies a failed step. Microsoft YaHei UI follows the Windows desktop environment. Native window chrome retains resizing and window management, with a dark title bar on supported Windows versions.
 
 The main surface presents the fixed Wand version, current task, completed-step progress, launch preference and one Install action. Configuration removal and login effects remain visible before installation. Execution records expand on demand and automatically on failure. Secondary controls open actual saved logs and backups. Author A-FEI- and the clickable bbs.gbtgame.me address stay in the sidebar footer.
 

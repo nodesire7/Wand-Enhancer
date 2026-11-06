@@ -19,6 +19,11 @@ internal static class InstallerTests
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--uninstall")
+        {
+            File.WriteAllText(Environment.GetEnvironmentVariable("WAND_REMOVAL_TEST_MARKER"), "confirmation-required");
+            return 0;
+        }
         if (args.Length > 0 && args[0] == "--echo")
         {
             Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), new System.Text.UTF8Encoding(false)) { AutoFlush = true });
@@ -84,6 +89,13 @@ internal static class InstallerTests
                 finally { Environment.SetEnvironmentVariable("WAND_INSTALLER_TEST_ROOT", null); }
             });
             Test("registry backup preserves kinds, binary values, strings and subkeys", TestRegistry);
+            Test("silent removal never launches the original interactive uninstaller", TestSilentRemoval);
+            Test("shortcut cleanup backs up only links targeting the removed installation", TestShortcuts);
+            Test("silent removal rejects unsafe targets before any stop or cleanup action", () => {
+                bool touched = false;
+                Throws(() => SilentRemoval.Remove(Path.GetTempPath(), Path.GetTempPath(), "Other", path => touched = true, () => touched = true, () => touched = true));
+                Check(!touched, "Unsafe removal had side effects");
+            });
             Test("Windows command argument quoting survives a real subprocess round-trip", () => {
                 string[] values = { "", "plain", "中文 路径", "a\tb", "embedded\"quote", @"C:\folder with space\", "\\\\\"", "line\nbreak", "--flag=value" };
                 var start = new System.Diagnostics.ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location,
@@ -138,8 +150,83 @@ internal static class InstallerTests
                 var values = InstallEngine.StartupValues(run, @"C:\Apps\Wand");
                 Equal(values.Count, 1); Check(values.ContainsKey("own"), "Own startup missing");
             }
+            using (var command = root.CreateSubKey(@"Software\Classes\wemod\shell\open\command")) command.SetValue("", "\"C:\\Apps\\Wand\\Wand.exe\" \"%1\"");
+            using (var command = root.CreateSubKey(@"Software\Classes\wand\shell\open\command")) command.SetValue("", "\"C:\\Apps\\Other\\Other.exe\" \"%1\"");
+            var protocols = UserShellCleanup.AssociatedProtocolKeys(root, @"C:\Apps\Wand").ToArray();
+            Equal(protocols.Length, 1); Equal(protocols[0], @"Software\Classes\wemod");
         }
         finally { Registry.CurrentUser.DeleteSubKeyTree(keyPath, false); }
+    }
+
+    private static void TestSilentRemoval()
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), "wand-removal-test-" + Guid.NewGuid().ToString("N"));
+        string local = Path.Combine(scratch, "Local");
+        string roaming = Path.Combine(scratch, "Roaming");
+        string root = Path.Combine(local, "Wand");
+        string marker = Path.Combine(scratch, "confirmation.marker");
+        Directory.CreateDirectory(root); Directory.CreateDirectory(Path.Combine(roaming, "Wand"));
+        File.Copy(System.Reflection.Assembly.GetExecutingAssembly().Location, Path.Combine(root, "Update.exe"));
+        File.Copy(typeof(InstallerWindow).Assembly.Location, Path.Combine(root, "WandSetup.exe"));
+        File.WriteAllText(Path.Combine(roaming, "Wand", "old.txt"), "old settings");
+        string readOnly = Path.Combine(root, "readonly.txt"); File.WriteAllText(readOnly, "read-only application file"); File.SetAttributes(readOnly, FileAttributes.ReadOnly);
+        string sibling = Path.Combine(local, "WandOther"); Directory.CreateDirectory(sibling);
+        File.WriteAllText(Path.Combine(sibling, "keep.txt"), "unrelated");
+        Environment.SetEnvironmentVariable("WAND_REMOVAL_TEST_MARKER", marker);
+        try
+        {
+            bool stopped = false, registry = false, shortcuts = false;
+            SilentRemoval.Remove(local, roaming, "Wand", path => { Equal(path, root); stopped = true; }, () => shortcuts = true, () => registry = true);
+            Check(!File.Exists(marker), "Original uninstaller was launched and requested confirmation");
+            Check(stopped && registry && shortcuts, "Cleanup steps were skipped");
+            Check(!Directory.Exists(root) && !Directory.Exists(Path.Combine(roaming, "Wand")), "Old installation remains");
+            Check(File.Exists(Path.Combine(sibling, "keep.txt")), "Unrelated directory was removed");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WAND_REMOVAL_TEST_MARKER", null);
+            Check(Path.GetFullPath(scratch).StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase), "Invalid fixture cleanup path");
+            Directory.Delete(scratch, true);
+        }
+    }
+
+    private static void TestShortcuts()
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), "wand-shortcut-test-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(scratch, "Wand");
+        string programs = Path.Combine(scratch, "Programs");
+        string group = Path.Combine(programs, "Wand");
+        string desktop = Path.Combine(scratch, "Desktop");
+        string backup = Path.Combine(scratch, "Backup");
+        Directory.CreateDirectory(root); Directory.CreateDirectory(group); Directory.CreateDirectory(desktop);
+        object shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true));
+        Action<string, string> create = (path, target) => {
+            object link = shell.GetType().InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, new object[] { path });
+            try
+            {
+                link.GetType().InvokeMember("TargetPath", System.Reflection.BindingFlags.SetProperty, null, link, new object[] { target });
+                link.GetType().InvokeMember("Save", System.Reflection.BindingFlags.InvokeMethod, null, link, null);
+            }
+            finally { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link); }
+        };
+        try
+        {
+            create(Path.Combine(desktop, "My Wand.lnk"), Path.Combine(root, "Wand.exe"));
+            create(Path.Combine(group, "Wand.lnk"), Path.Combine(root, "Update.exe"));
+            create(Path.Combine(desktop, "Wand.lnk"), Path.Combine(scratch, "Other", "Other.exe"));
+            UserShellCleanup.RemoveShortcuts(root, backup, new Dictionary<string, string> { { "Desktop", desktop }, { "Programs", programs } });
+            Check(!File.Exists(Path.Combine(desktop, "My Wand.lnk")), "Owned desktop shortcut remains");
+            Check(!Directory.Exists(group), "Empty Wand start menu folder remains");
+            Check(File.Exists(Path.Combine(desktop, "Wand.lnk")), "Same-name unrelated shortcut was deleted");
+            Check(File.Exists(Path.Combine(backup, "Desktop", "My Wand.lnk")), "Desktop shortcut backup missing");
+            Check(File.Exists(Path.Combine(backup, "Programs", "Wand", "Wand.lnk")), "Start menu shortcut backup missing");
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
+            Check(Path.GetFullPath(scratch).StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase), "Invalid shortcut fixture cleanup path");
+            Directory.Delete(scratch, true);
+        }
     }
 
     private static void TestWindow()
