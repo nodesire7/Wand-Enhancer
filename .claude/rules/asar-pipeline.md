@@ -11,6 +11,7 @@ paths:
 - Back up and restore both `resources/app.asar` and `resources/app.asar.unpacked`. Every destructive step of `Enhancer.Patch()`, including restoring the pristine files (`PrepareBackups`), stays inside the rollback `try`: a lock mid-restore otherwise leaves a half-empty `app.asar.unpacked` and an unlaunchable Wand.
 - Inject `web-panel/dist` as `remote-panel`. It must already contain `bridge.cjs` and the generated default scripts under `renderer-scripts`; selected and local custom scripts are copied under `remote-panel/renderer-scripts` afterwards.
 - `AsarExtractor.ExtractAll` skips unpacked entries whose source path equals the destination (in-place extraction is a self-copy that fails on locked files such as `TrainerLib_x64.dll`) and unpacked entries whose source is missing on disk (an installer removed `auxiliary/GameLauncher.exe`). Do not turn either case back into a failure.
+- `PatchVerification` rebuilds expected candidate JS and remote assets from pristine backups in a temporary directory, then reads the actual packed/unpacked ASAR entries and compares bytes. It also compares a freshly patched auxiliary copy and checks Static fuse or Supervised launcher enablement. `Enhancer.Patch()` runs this before clearing the incomplete marker, rolls back on mismatch, and records the selection in `.applied-patch.json` under the installation resources directory. `IsPatched` verifies the recorded selection; backups or a selection file alone are never proof. Restore removes that selection file.
 
 ## Auxiliary service gate
 

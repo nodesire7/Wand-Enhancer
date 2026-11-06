@@ -99,7 +99,7 @@ namespace WandEnhancer.Core.Patching.Content
             }
         }
 
-        private static bool IsCandidateBundleFile(string filePath)
+        internal static bool IsCandidateBundleFile(string filePath)
         {
             string fileName = Path.GetFileName(filePath);
             return fileName.Equals(IndexBundleFileName, StringComparison.OrdinalIgnoreCase)

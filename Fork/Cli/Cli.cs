@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using Newtonsoft.Json;
 using WandEnhancer.Core;
+using WandEnhancer.Core.Patching.Content;
 using WandEnhancer.Core.Patching.Shared;
 using WandEnhancer.Core.Patching.Strategies;
 using WandEnhancer.Models;
@@ -34,7 +35,7 @@ namespace WandEnhancer.Fork
             Action<string, ELogType> log = (message, level) => logs.Add(new { level = level.ToString(), message });
             try
             {
-                if (!new[] { "help", "version", "status", "patch", "restore", "launch" }.Contains(command))
+                if (!new[] { "help", "version", "status", "verify", "patch", "restore", "launch" }.Contains(command))
                     return Reply(2, command, "Unknown command. Use --cli help.", null, logs);
 
                 var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -47,14 +48,14 @@ namespace WandEnhancer.Fork
                     else if (++i < args.Length && !args[i].StartsWith("--")) options.Add(name, args[i]);
                     else return Reply(2, command, "Missing value for " + name, null, logs);
                 }
-                if (options.Keys.Any(k => (command != "patch" && (k == "--patches" || k == "--auto-apply" || k == "--config")) ||
-                    (command != "patch" && command != "launch" && k == "--strategy") ||
+                if (options.Keys.Any(k => (command != "patch" && command != "verify" && (k == "--patches" || k == "--auto-apply" || k == "--config")) ||
+                    (command != "patch" && command != "verify" && command != "launch" && k == "--strategy") ||
                     ((command == "help" || command == "version") && options.Count > 0)))
                     return Reply(2, command, "Option does not apply to this command.", null, logs);
 
                 if (command == "help") return Reply(0, command, "Headless CLI; every response is one JSON object.", new {
-                    commands = new[] { "version", "status", "patch", "restore", "launch" },
-                    options = "--path <install root|app folder|exe> --expected-version <version>; patch: --config <PatchConfig.json> OR --patches pro,disable-updates,devtools,remote-panel --strategy static|supervised --auto-apply; launch: --strategy static|supervised",
+                    commands = new[] { "version", "status", "verify", "patch", "restore", "launch" },
+                    options = "--path <install root|app folder|exe> --expected-version <version>; patch/verify: --config <PatchConfig.json> OR --patches pro,disable-updates,devtools,remote-panel --strategy static|supervised --auto-apply; launch: --strategy static|supervised",
                     exitCodes = "0 success; 2 invalid arguments; 3 no install; 4 version mismatch; 5 operation failed; 6 busy"
                 }, logs);
                 if (command == "version") return Reply(0, command, "WandEnhancer CLI", new { cliVersion = 1 }, logs);
@@ -65,7 +66,7 @@ namespace WandEnhancer.Fork
                     if (strategy != "static" && strategy != "supervised") return Reply(2, command, "Invalid strategy.", null, logs);
                     patchConfig.Strategy = strategy == "static" ? EPatchStrategy.Static : EPatchStrategy.Supervised;
                 }
-                if (command == "patch")
+                if (command == "patch" || command == "verify")
                 {
                     if (options.TryGetValue("--config", out string configPath))
                     {
@@ -119,12 +120,23 @@ namespace WandEnhancer.Fork
                     if (!acquired) return Reply(6, command, "Another CLI operation is running.", null, logs);
                     try
                     {
+                        if (command == "verify")
+                        {
+                            var verification = PatchVerification.Verify(install, patchConfig);
+                            return Reply(verification.Verified ? 0 : 5, command, verification.Message,
+                                new { verified = verification.Verified, verification.FilesChecked, path = install.RootDirectory,
+                                    executable = install.ExecutablePath, strategy = patchConfig.Strategy.ToString(), patches = patchConfig.PatchTypes }, logs);
+                        }
                         if (command == "patch") new Enhancer(install, log, patchConfig).Patch();
                         else if (command == "restore") new Enhancer(install, log).Restore();
                         else
                         {
-                            var saved = Enhancer.LoadAutoPatchConfig(LauncherDeployment.SquirrelRootOf(install));
+                            var saved = PatchVerification.ReadConfig(install.RootDirectory);
                             var mode = options.ContainsKey("--strategy") ? patchConfig.Strategy : saved?.Strategy ?? EPatchStrategy.Static;
+                            var verification = PatchVerification.Verify(install, saved);
+                            if (!verification.Verified || saved.Strategy != mode)
+                                return Reply(5, command, "Launch blocked: " + (!verification.Verified ? verification.Message : "Requested strategy differs from verified patch."),
+                                    new { verified = false, path = install.RootDirectory }, logs);
                             if (!LaunchDetached(install, mode, log))
                                 return Reply(5, command, "Launch failed.", Describe(install, version), logs);
                         }
@@ -151,10 +163,16 @@ namespace WandEnhancer.Fork
             })) return true;
         }
 
-        private static object Describe(WeModConfig install, string version) => new {
-            path = install.RootDirectory, executable = install.ExecutablePath, brand = install.BrandName, version,
-            patched = Enhancer.IsPatched(install.RootDirectory), hasBackup = Enhancer.HasBackup(install.RootDirectory)
-        };
+        private static object Describe(WeModConfig install, string version)
+        {
+            PatchVerificationResult verification;
+            try { verification = PatchVerification.Verify(install, PatchVerification.ReadConfig(install.RootDirectory)); }
+            catch (Exception error) { verification = new PatchVerificationResult { Message = error.Message }; }
+            return new {
+                path = install.RootDirectory, executable = install.ExecutablePath, brand = install.BrandName, version,
+                patched = verification.Verified, hasBackup = Enhancer.HasBackup(install.RootDirectory), verification
+            };
+        }
 
         private static int Reply(int code, string command, string message, object data, List<object> logs)
         {

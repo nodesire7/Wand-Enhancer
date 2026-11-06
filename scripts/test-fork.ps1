@@ -81,7 +81,7 @@ try {
     Assert (-not (Test-Path (Join-Path $resources '.incomplete-patch'))) 'Mismatch must not start patch pipeline'
     [IO.File]::WriteAllText((Join-Path $resources 'app.asar.backup'), 'backup')
     [IO.Directory]::CreateDirectory((Join-Path $resources 'app.asar.unpacked.backup')) | Out-Null
-    Assert ((Invoke-Cli @('status', '--path', $install)).data.patched -eq $true) 'Patched fixture status'
+    Assert ((Invoke-Cli @('status', '--path', $install)).data.patched -eq $false) 'Backup-only pristine fixture must not report applied modifications'
     [IO.File]::WriteAllText((Join-Path $resources '.incomplete-patch'), '')
     Assert ((Invoke-Cli @('status', '--path', $install)).data.patched -eq $false) 'Incomplete fixture status'
 
@@ -94,8 +94,11 @@ try {
     Assert ([IO.File]::ReadAllText((Join-Path $resources 'app.asar')) -eq 'fixture archive') 'Busy CLI must not mutate files'
 
     try {
-        [void](Invoke-Cli @('launch', '--path', $install, '--strategy', 'static'))
-        # The fake client outlives the CLI. Its output pipe must already be closed.
+        [void](Invoke-Cli @('verify', '--path', $install) 5)
+        [void](Invoke-Cli @('launch', '--path', $install, '--strategy', 'static') 5)
+        Assert (@([Diagnostics.Process]::GetProcessesByName('Wand') | Where-Object {
+            try { $_.MainModule.FileName -eq (Join-Path $install 'Wand.exe') } catch { $false } finally { $_.Dispose() }
+        }).Count -eq 0) 'Unverified fixture must never start'
     } finally {
         foreach ($child in [Diagnostics.Process]::GetProcessesByName('Wand')) {
             try {
@@ -135,7 +138,7 @@ try {
     Assert ($embeddedHash -eq (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash) 'Installer must embed the exact CLI from this build'
     & (Join-Path $PSScriptRoot 'reapply-fork.ps1') -Check
     if ($LASTEXITCODE -ne 0) { throw 'Fork hook validation failed.' }
-    Write-Host 'Fork tests passed: CLI protocol, validation, Unicode paths, version guard, patch state, detached launch, deletion boundaries, junction refusal, embedded CLI identity.'
+    Write-Host 'Fork tests passed: CLI protocol, validation, Unicode paths, version guard, backup-only false-positive rejection, verification and launch refusal, deletion boundaries, junction refusal, embedded CLI identity.'
 } finally {
     $absolute = [IO.Path]::GetFullPath($scratch)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())

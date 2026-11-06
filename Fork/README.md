@@ -12,7 +12,7 @@
 2. 备份当前用户的 Wand / WeMod Roaming 配置及相关 HKCU 注册表。
 3. 关闭默认安装目录内的进程，静默移除默认目录、相关快捷方式及已备份的注册表项。不会启动原版卸载器或客户端卸载事件，不需要点击卸载确认框。
 4. 静默安装固定版本 Wand 12.68.0，等待安装进程退出和文件写入稳定。
-5. 调用内置 CLI 应用界面选定的配置，并检查修改状态。默认 Static、Pro 和禁止更新；可选择 Supervised、F12 开发工具、远程访问、更新后自动应用和自定义 `.js` 脚本。
+5. 调用内置 CLI 应用界面选定的配置，再从原始备份重建预期内容，重新读取实际 ASAR 逐文件比较，并检查辅助服务及启动策略。默认 Static、Pro 和禁止更新；可选择 Supervised、F12 开发工具、远程访问、更新后自动应用和自定义 `.js` 脚本。
 6. 启动 Wand。可取消勾选“完成后启动 Wand”。
 
 开始前保存游戏进度。清理会退出原有登录状态。清理范围为当前用户 `%LOCALAPPDATA%\Wand`、`%LOCALAPPDATA%\WeMod` 和相应 Roaming 目录；不扫描清理系统注册表。遇到系统级安装、自定义安装位置或目录链接，会停止并说明原因，需先手动卸载。这是应用专用清理，不依赖 Geek，也不宣称覆盖 Geek 的全部扫描能力。
@@ -24,6 +24,8 @@ CI 发布的轻量版内置 CLI，原版安装包需放在 `WandSetup.exe` 同�
 ## 安装后作为启动器
 
 完成后安装记录与功能选择保存在 `%LOCALAPPDATA%\GBTGAME\WandSetup\installation.json`。以后从同一个 EXE 启动，自动恢复策略、功能开关及自定义脚本；启动前重新应用、验证并保存配置，然后启动 Wand。此流程不读取原版安装包，不备份/清理 Roaming、不卸载、不安装。应用功能会关闭正在运行的 Wand。
+
+Pro 选项同时处理启动时的缓存账号，以及之后的接口响应和账号更新。应用记录另存于版本目录的 `resources\.applied-patch.json`；它只保存功能选择，校验仍重新读取实际内容。记录存在不代表功能通过。检查发现归档、辅助服务或启动策略不一致时会停止启动并显示具体原因。
 
 兼容旧工具已安装的 12.68.0，无安装记录也会识别现有程序；旧版本没有保存的选项需确认一次，之后会自动记住。记录损坏不会把存在的程序当成未安装；检测版本和必要文件，不匹配或不完整则停止，不会自动重装或降级。界面打开后程序消失也会停止启动，需显式重新检测。
 
@@ -46,11 +48,12 @@ WandEnhancer.exe --cli help
 WandEnhancer.exe --cli version
 WandEnhancer.exe --cli status --path "C:\Users\name\AppData\Local\Wand"
 WandEnhancer.exe --cli patch --path "C:\Users\name\AppData\Local\Wand" --expected-version 12.68.0 --patches pro,disable-updates --strategy static
+WandEnhancer.exe --cli verify --path "C:\Users\name\AppData\Local\Wand" --patches pro,disable-updates --strategy static
 WandEnhancer.exe --cli restore --path "C:\Users\name\AppData\Local\Wand"
 WandEnhancer.exe --cli launch --path "C:\Users\name\AppData\Local\Wand" --strategy static
 ```
 
-`--path` 接受 Squirrel 根目录、`app-*` 版本目录或 EXE；省略时调用已有安装检测。`--expected-version` 在任何修改前检查版本。`patch` 默认 `pro,disable-updates`，策略默认 `static`；可选补丁 `devtools,remote-panel`，可选策略 `supervised`。保持自动更新时用 `--patches pro --auto-apply`；它与 `disable-updates` 互斥。`launch` 对仅修改时未保存的 Supervised 配置，应明确传入 `--strategy supervised`。
+`--path` 接受 Squirrel 根目录、`app-*` 版本目录或 EXE；省略时调用已有安装检测。`--expected-version` 在任何修改前检查版本。`patch` 和只读 `verify` 默认 `pro,disable-updates`，策略默认 `static`；可选补丁 `devtools,remote-panel`，可选策略 `supervised`。保持自动更新时用 `--patches pro --auto-apply`；它与 `disable-updates` 互斥。`verify` 支持与 `patch` 相同的 `--config` JSON，并在不一致时返回 5。`launch` 使用本次实际应用的策略，内容校验失败或请求另一策略时拒绝启动。`status.data.patched` 只有实际文件校验通过才为 true；详细原因在 `data.verification` 中。
 
 上述命令中的 `WandEnhancer.exe` 均可直接替换成 `WandSetup.exe`，无需外置增强器。Static 启动后 CLI 立即退出；直接调用 CLI 的 Supervised 模式会监控到 Wand 退出。安装助手选择 Supervised 时，通过安装目录中的持久启动器运行，安装界面不会等待 Wand 退出。
 

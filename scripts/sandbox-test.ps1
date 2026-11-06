@@ -9,7 +9,7 @@ $failure = $null
 $log = Join-Path $OutputDirectory 'acceptance.log'
 Start-Transcript -Path $log -Force | Out-Null
 function Assert($condition, [string]$message) { if (-not $condition) { throw $message } }
-function Invoke-TestExe([string]$Name, [string[]]$Arguments) {
+function Invoke-TestExe([string]$Name, [string[]]$Arguments, [int]$ExpectedCode = 0) {
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $PSScriptRoot $Name))
     $process.StartInfo.Arguments = [string]::Join(' ', @($Arguments | ForEach-Object { '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"' }))
@@ -24,9 +24,9 @@ function Invoke-TestExe([string]$Name, [string[]]$Arguments) {
         $errorText = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit(1200000)) { $process.Kill(); throw "$Name timed out" }
         if (-not $output.Wait(10000)) { throw "$Name held its output pipe open" }
-        Assert ($process.ExitCode -eq 0) "$Name failed: $($output.Result) $($errorText.Result)"
+        Assert ($process.ExitCode -eq $ExpectedCode) "$Name expected $ExpectedCode`: $($output.Result) $($errorText.Result)"
         $reply = $output.Result | ConvertFrom-Json
-        Assert $reply.success "$Name reported failure"
+        Assert ($reply.success -eq ($ExpectedCode -eq 0)) "$Name reported unexpected success state"
         return $reply
     } finally { $process.Dispose() }
 }
@@ -39,6 +39,23 @@ try {
     Assert $state.data.patched 'Fresh install is not patched'
     Assert (@(Get-Process Wand -ErrorAction SilentlyContinue).Count -eq 0) 'Wand started before the explicitly requested launch'
     $checks.Add('fresh install, static patch and no premature first launch')
+    [void](Invoke-TestExe 'WandSetup.exe' @('--cli', 'verify', '--path', $root))
+    $archive = Join-Path $state.data.path 'resources\app.asar'
+    $savedArchive = Join-Path $env:TEMP ('wand-acceptance-' + [guid]::NewGuid().ToString('N') + '.asar')
+    Copy-Item -LiteralPath $archive -Destination $savedArchive
+    try {
+        Copy-Item -LiteralPath ($archive + '.backup') -Destination $archive -Force
+        $stale = Invoke-TestExe 'WandSetup.exe' @('--cli', 'status', '--path', $root)
+        Assert (-not $stale.data.patched) 'Backups and patched staging hid a pristine actual archive'
+        [void](Invoke-TestExe 'WandSetup.exe' @('--cli', 'verify', '--path', $root) 5)
+        [void](Invoke-TestExe 'WandSetup.exe' @('--cli', 'launch', '--path', $root) 5)
+        Assert (@(Get-Process Wand -ErrorAction SilentlyContinue).Count -eq 0) 'Unverified client was launched'
+    } finally {
+        Copy-Item -LiteralPath $savedArchive -Destination $archive -Force
+        Remove-Item -LiteralPath $savedArchive -Force
+    }
+    [void](Invoke-TestExe 'WandSetup.exe' @('--cli', 'verify', '--path', $root))
+    $checks.Add('actual archive verification, backup-only false-positive rejection and unverified launch refusal')
 
     $roaming = Join-Path $env:APPDATA 'Wand'
     [IO.Directory]::CreateDirectory($roaming) | Out-Null

@@ -32,6 +32,8 @@ namespace WandEnhancer.Fork.Installer
         private readonly Package package;
         private readonly PatchConfig selectedConfig;
         private PatchConfig preparedConfig;
+        private string patchedInstallPath;
+        private string verifiedInstallPath;
         private string enhancer;
         private string setup;
         private string backup;
@@ -163,23 +165,30 @@ namespace WandEnhancer.Fork.Installer
             preparedConfig = PatchScriptStore.Copy(preparedConfig, Path.Combine(root, "WandEnhancerScripts"));
             string configFile = Path.Combine(scratch, "patch-config.json");
             File.WriteAllText(configFile, Json.Serialize(preparedConfig));
-            Cli("patch", "--path", root, "--expected-version", package.version,
+            var patched = Cli("patch", "--path", root, "--expected-version", package.version,
                 "--config", configFile);
+            patchedInstallPath = ((Dictionary<string, object>)patched["data"])["path"] as string;
         }
 
         bool IInstallSteps.Verify()
         {
-            string root = Path.Combine(local, "Wand");
-            var state = Cli("status", "--path", root, "--expected-version", package.version);
+            if (string.IsNullOrEmpty(patchedInstallPath)) throw new InvalidOperationException("没有记录实际修改的 Wand 目录。");
+            var state = Cli("verify", "--path", patchedInstallPath, "--expected-version", package.version,
+                "--config", Path.Combine(scratch, "patch-config.json"));
             var data = state["data"] as Dictionary<string, object>;
-            return data != null && Convert.ToBoolean(data["patched"]);
+            if (data == null || !Convert.ToBoolean(data["verified"])) return false;
+            verifiedInstallPath = data["path"] as string;
+            if (!string.Equals(verifiedInstallPath, patchedInstallPath, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("验证目录与修改目录不一致，已停止启动。");
+            return true;
         }
 
         void IInstallSteps.Launch()
         {
             string root = Path.Combine(local, "Wand");
+            if (string.IsNullOrEmpty(verifiedInstallPath)) throw new InvalidOperationException("尚未验证 Wand 的实际修改内容，已停止启动。");
             if (selectedConfig.Strategy == EPatchStrategy.Static)
-                Cli("launch", "--path", root, "--expected-version", package.version, "--strategy", "static");
+                Cli("launch", "--path", verifiedInstallPath, "--expected-version", package.version, "--strategy", "static");
             else
             {
                 // The deployed launcher owns the long-running supervisor. The installer's

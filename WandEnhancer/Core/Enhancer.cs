@@ -53,12 +53,15 @@ namespace WandEnhancer.Core
             _unpackedBackupPath = Path.Combine(weModConfig.RootDirectory, ResourcesDirectoryName, AppAsarUnpackedBackupDirectoryName);
         }
 
-        /// <summary>Checks if both backups exist and incomplete marker is absent.</summary>
+        /// <summary>Verifies the recorded selection against the files Wand actually reads.</summary>
         public static bool IsPatched(string rootDirectory)
         {
-            var resources = Path.Combine(rootDirectory, ResourcesDirectoryName);
-            return HasBackup(rootDirectory)
-                   && !File.Exists(Path.Combine(resources, IncompletePatchMarkerFileName));
+            try
+            {
+                return PatchVerification.Verify(WeModInstalls.CheckWeModPath(rootDirectory),
+                    PatchVerification.ReadConfig(rootDirectory)).Verified;
+            }
+            catch (Exception) { return false; }
         }
 
         public static bool HasBackup(string rootDirectory)
@@ -216,6 +219,7 @@ namespace WandEnhancer.Core
             // not leave a half-empty app.asar.unpacked. Never leave a patched archive without its launcher.
             try
             {
+                File.Delete(Path.Combine(Path.GetDirectoryName(_asarPath), PatchVerification.ConfigFileName));
                 PrepareBackups();
 
                 // Start from a pristine executable to not inherit a broken signature from prior static patches.
@@ -238,6 +242,10 @@ namespace WandEnhancer.Core
                     LauncherDeployment.Restore(_weModConfig);
                 }
 
+                var verification = PatchVerification.Check(_weModConfig, _config, true);
+                if (!verification.Verified) throw new InvalidDataException("[ENHANCER] Verification failed: " + verification.Message);
+                _logger("[ENHANCER] " + verification.Message, ELogType.Success);
+
                 // Independent of the strategy: catching an update needs to run the moment Squirrel
                 // writes a new version folder, not on next launch. Squirrel rewrites the root
                 // execution stub as part of applying the update itself, so by the time the user
@@ -255,6 +263,8 @@ namespace WandEnhancer.Core
                     Services.WatcherAutostart.Stop(_weModConfig);
                 }
 
+                File.WriteAllText(Path.Combine(Path.GetDirectoryName(_asarPath), PatchVerification.ConfigFileName),
+                    Newtonsoft.Json.JsonConvert.SerializeObject(_config));
                 File.Delete(markerPath);
             }
             catch
@@ -420,6 +430,8 @@ namespace WandEnhancer.Core
 
             // launcher.log stays: bug reports ask for it and Restore is what users run right after a failure.
             DeleteAutoPatchConfig();
+
+            File.Delete(Path.Combine(Path.GetDirectoryName(_asarPath), PatchVerification.ConfigFileName));
 
             Services.WatcherAutostart.RemoveDeployed(SquirrelRoot, _logger);
 

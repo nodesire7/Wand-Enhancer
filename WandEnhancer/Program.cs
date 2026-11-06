@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using WandEnhancer.Core;
+using WandEnhancer.Core.Patching.Content;
 using WandEnhancer.Core.Patching.Strategies;
 using WandEnhancer.Models;
 using WandEnhancer.Utils;
@@ -108,6 +109,8 @@ namespace WandEnhancer
                 return false;
             }
 
+            patchConfig = patchConfig ?? PatchVerification.ReadConfig(config.RootDirectory);
+
             bool isPatched = Enhancer.IsPatched(config.RootDirectory);
             LauncherLog.Write($"Install {config.ExecutablePath} is {(isPatched ? "patched" : "not patched")}.",
                 ELogType.Info);
@@ -115,6 +118,13 @@ namespace WandEnhancer
             // Re-apply saved patches automatically on updates. Fall back to UI on failure.
             if (!isPatched && !TryAutoPatch(config, patchConfig))
                 return false;
+
+            var verification = PatchVerification.Verify(config, patchConfig);
+            if (!verification.Verified)
+            {
+                RecordStartupLog("Launch blocked: " + verification.Message, ELogType.Error);
+                return false;
+            }
 
 #if ENABLE_UPDATE_NOTIFICATIONS
             UpdateNotifier.CheckInBackground();
