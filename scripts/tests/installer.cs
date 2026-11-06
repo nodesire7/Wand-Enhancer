@@ -146,6 +146,8 @@ internal static class InstallerTests
                 }
                 finally { if (!process.HasExited) { process.Kill(); process.WaitForExit(5000); } }
             });
+            Test("backup restore, automatic recovery, deletion boundaries and rollback", TestBackupStore);
+            Test("settings registry round-trip preserves value kinds and rejects other keys", TestSettingsRestore);
             Test("WPF default, busy, failure, success, minimum size and DPI layouts", TestWindow);
             Console.WriteLine("PASS: " + passed + " installer test groups");
             File.WriteAllText(Path.Combine(output, "result.json"), InstallEngine.Json.Serialize(new { success = true, groups = passed }));
@@ -364,8 +366,211 @@ internal static class InstallerTests
             Test("install, busy guard, log, backup, forum, failure, retry and finish buttons", TestWorkflowControls);
             Test("invalid options never create a session and logging errors never crash recovery", TestRecoveryControls);
             Test("long scripts, scrolling and minimum/maximized layouts keep actions reachable", TestLongContent);
+            Test("backup management buttons, confirmation, busy guard and failures", TestBackupControls);
+            Test("accordion replaces sections without pushing status, and reverses animation", TestAccordion);
         }
         finally { SynchronizationContext.SetSynchronizationContext(null); app.Shutdown(); }
+    }
+
+
+    private static void ThrowsAny(Action action)
+    {
+        bool failed = false; try { action(); } catch { failed = true; } Check(failed, "Unsafe operation was accepted");
+    }
+    private static void TestBackupStore()
+    {
+        string fixture = Path.Combine(output, "backup-store-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(fixture, "backups"), roaming = Path.Combine(fixture, "Roaming"), local = Path.Combine(fixture, "Local");
+        string backup = Path.Combine(root, "20261106-120000-" + Guid.NewGuid().ToString("N"));
+        string saved = Path.Combine(backup, "Roaming", "Wand"), current = Path.Combine(roaming, "Wand");
+        Directory.CreateDirectory(saved); Directory.CreateDirectory(current); Directory.CreateDirectory(local);
+        File.WriteAllText(Path.Combine(saved, "config.json"), "old"); File.WriteAllText(Path.Combine(current, "config.json"), "current");
+        File.WriteAllText(Path.Combine(current, "new-only.txt"), "remove when restoring");
+        File.WriteAllText(Path.Combine(backup, "说明.txt"), "legacy backup");
+        File.WriteAllText(Path.Combine(backup, "Wand-Registry32-settings.json"), "old registry");
+        File.WriteAllText(Path.Combine(backup, "Wand-Registry32-uninstall.json"), "must not restore uninstall data");
+        int stopped = 0; var registry = new FakeRegistry();
+        var store = new BackupStore(root, roaming, local, registry, path => stopped++);
+        try
+        {
+            Equal(store.List().Count, 1); Check(store.List()[0].CanRestore, "Legacy backup not recognized");
+            string recovery = store.Restore(backup);
+            Equal(stopped, 1); Equal(File.ReadAllText(Path.Combine(current, "config.json")), "old");
+            Check(!File.Exists(Path.Combine(current, "new-only.txt")), "Restore merged stale files");
+            Equal(File.ReadAllText(Path.Combine(recovery, "Roaming", "Wand", "config.json")), "current");
+            Equal(registry.Values[RegistryView.Registry32], "old registry");
+            Check(!registry.Restored.Any(value => value.Contains("uninstall")), "Old registration was restored");
+            store.Restore(recovery); Equal(File.ReadAllText(Path.Combine(current, "config.json")), "current");
+            Equal(registry.Values[RegistryView.Registry32], "current registry");
+            registry.FailOnce = true;
+            ThrowsAny(() => store.Restore(backup));
+            Equal(File.ReadAllText(Path.Combine(current, "config.json")), "current");
+            Equal(registry.Values[RegistryView.Registry32], "current registry");
+            registry.Values[RegistryView.Registry32] = "bad";
+            ThrowsAny(() => store.Restore(backup));
+            Equal(File.ReadAllText(Path.Combine(current, "config.json")), "current");
+            registry.Values[RegistryView.Registry32] = "current registry";
+            int previous = stopped;
+            File.WriteAllText(Path.Combine(backup, "Wand-Registry32-settings.json"), "bad");
+            ThrowsAny(() => store.Restore(backup)); Equal(stopped, previous);
+            ThrowsAny(() => store.Delete(root));
+            ThrowsAny(() => store.Delete(Path.Combine(fixture, Path.GetFileName(backup))));
+            File.SetAttributes(Path.Combine(saved, "config.json"), FileAttributes.ReadOnly);
+            store.Delete(backup); Check(!Directory.Exists(backup), "Selected backup remains");
+            Check(Directory.Exists(recovery), "Another backup was deleted");
+            Check(File.Exists(Path.Combine(current, "config.json")), "Deleting a backup changed current configuration");
+        }
+        finally { BackupStore.Guard(fixture); Directory.Delete(fixture, true); }
+    }
+    private sealed class FakeRegistry : ISettingsRegistry
+    {
+        public Dictionary<RegistryView, string> Values = new Dictionary<RegistryView, string> { { RegistryView.Registry32, "current registry" }, { RegistryView.Registry64, "current registry64" } };
+        public bool FailOnce;
+        public List<string> Restored = new List<string>();
+        public string Capture(string brand, RegistryView view) { return Values[view]; }
+        public void Validate(string json, string brand) { if (json == "bad") throw new IOException("bad snapshot"); }
+        public void Restore(string json, string brand, RegistryView view)
+        {
+            if (FailOnce) { FailOnce = false; throw new IOException("fixture write failure"); }
+            Restored.Add(json); Values[view] = json;
+        }
+    }
+    private static void TestSettingsRestore()
+    {
+        string parent = @"Software\GBTGAME\Backup.Tests\" + Guid.NewGuid().ToString("N");
+        var registry = new SettingsRegistry(parent);
+        try
+        {
+            using (var key = Registry.CurrentUser.CreateSubKey(parent + @"\Wand"))
+            {
+                key.SetValue("", "default"); key.SetValue("text", "中文"); key.SetValue("dword", -1, RegistryValueKind.DWord);
+                key.SetValue("qword", 1234567890123L, RegistryValueKind.QWord); key.SetValue("binary", new byte[] { 0, 127, 255 }, RegistryValueKind.Binary);
+                key.SetValue("expand", "%TEMP%\\fixture", RegistryValueKind.ExpandString); key.SetValue("multi", new[] { "one", "二" }, RegistryValueKind.MultiString);
+                using (var child = key.CreateSubKey("Nested")) child.SetValue("saved", "yes");
+            }
+            string saved = registry.Capture("Wand", RegistryView.Registry64);
+            registry.Validate(saved, "Wand");
+            registry.Restore("null", "Wand", RegistryView.Registry64);
+            registry.Restore(saved, "Wand", RegistryView.Registry64);
+            using (var key = Registry.CurrentUser.OpenSubKey(parent + @"\Wand"))
+            {
+                Equal((string)key.GetValue(""), "default"); Equal((int)key.GetValue("dword"), -1); Equal((long)key.GetValue("qword"), 1234567890123L);
+                Check(((byte[])key.GetValue("binary")).SequenceEqual(new byte[] { 0, 127, 255 }), "Binary lost");
+                Check(((string[])key.GetValue("multi")).SequenceEqual(new[] { "one", "二" }), "MultiString lost");
+                Equal(key.GetValueKind("expand"), RegistryValueKind.ExpandString);
+                Equal((string)key.GetValue("expand", null, RegistryValueOptions.DoNotExpandEnvironmentNames), "%TEMP%\\fixture");
+                using (var child = key.OpenSubKey("Nested")) Equal((string)child.GetValue("saved"), "yes");
+            }
+            ThrowsAny(() => registry.Restore(saved.Replace("HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE"), "Wand", RegistryView.Registry64));
+            ThrowsAny(() => registry.Restore(saved, "Other", RegistryView.Registry64));
+            Equal(registry.Capture("Wand", RegistryView.Registry64), saved);
+        }
+        finally { Registry.CurrentUser.DeleteSubKeyTree(parent, false); }
+    }
+    private static void SettleSections(InstallerWindow window)
+    {
+        PumpUntil(() => {
+            var host = Control<Grid>(window, "ContentSections");
+            if (host.ActualHeight <= 0) return true;
+            foreach (var section in new[] { "OptionsExpander", "LogExpander", "BackupsExpander" })
+            {
+                var control = Control<Expander>(window, section);
+                double height = control.IsExpanded ? Math.Max(36, host.ActualHeight - 72) : 36;
+                if (Math.Abs(control.ActualHeight - height) > 1) return false;
+            }
+            return true;
+        });
+        window.UpdateLayout();
+    }
+    private static void TestAccordion()
+    {
+        var window = new InstallerWindow(new FakeInteraction(), new FakeBackups()); window.Show();
+        try
+        {
+            Capture(window, "accordion-options", 820, 680, 96);
+            var status = Control<Border>(window, "StatusPanel");
+            var original = status.TranslatePoint(new Point(), window);
+            Control<Expander>(window, "LogExpander").IsExpanded = true;
+            Capture(window, "accordion-log", 820, 680, 96);
+            Check(!Control<Expander>(window, "OptionsExpander").IsExpanded, "Options did not fold");
+            Equal(status.TranslatePoint(new Point(), window), original);
+            Control<Expander>(window, "BackupsExpander").IsExpanded = true;
+            Capture(window, "accordion-backups", 820, 680, 96);
+            Check(!Control<Expander>(window, "LogExpander").IsExpanded, "Log did not fold");
+            var controller = (AccordionMotion)typeof(InstallerWindow).GetField("accordion", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(window);
+            for (int i = 0; i < 12; i++)
+            {
+                Control<Expander>(window, i % 2 == 0 ? "OptionsExpander" : "LogExpander").IsExpanded = true;
+                controller.Layout(true);
+                Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.Render, new Action(() => {}));
+            }
+            SettleSections(window);
+            Equal(status.TranslatePoint(new Point(), window), original);
+            Check(Control<Expander>(window, "LogExpander").IsExpanded, "Rapid toggles ended in wrong section");
+            controller.Layout(false); SettleSections(window);
+        }
+        finally { window.Close(); }
+    }
+    private static void TestBackupControls()
+    {
+        var ui = new FakeInteraction(); var backups = new FakeBackups();
+        var window = new InstallerWindow(ui, backups); window.Show();
+        try
+        {
+            PumpUntil(() => Control<ListBox>(window, "BackupList").Items.Count == 1);
+            Control<Expander>(window, "BackupsExpander").IsExpanded = true;
+            Equal(Control<TextBox>(window, "BackupRootText").Text, backups.Root);
+            Click(Control<Button>(window, "OpenBackupRoot")); Equal(ui.Opened.Last(), backups.Root);
+            Click(Control<Button>(window, "OpenBackupFolder")); Equal(ui.Opened.Last(), backups.Entries[0].Path);
+            SettleSections(window); window.UpdateLayout(); double listHeight = Control<ListBox>(window, "BackupList").ActualHeight;
+            Click(Control<Button>(window, "DeleteBackup")); Equal(backups.Deleted, 0);
+            Equal(Control<Border>(window, "BackupConfirmation").Visibility, Visibility.Visible);
+            window.UpdateLayout(); Equal(Control<ListBox>(window, "BackupList").ActualHeight, listHeight);
+            Capture(window, "backups-confirm", 820, 680, 96);
+            Click(Control<Button>(window, "CancelBackup")); Equal(backups.Deleted, 0);
+            Click(Control<Button>(window, "RestoreBackup")); Equal(backups.Restored, 0);
+            backups.Hold = true; Click(Control<Button>(window, "ConfirmBackup"));
+            PumpUntil(() => backups.Restored == 1);
+            Check(!Control<Button>(window, "InstallButton").IsEnabled && !Control<Button>(window, "DeleteBackup").IsEnabled, "Backup operation did not block installation");
+            window.Close(); Check(window.IsVisible, "Window closed during restore");
+            Click(Control<Button>(window, "ConfirmBackup")); Equal(backups.Restored, 1);
+            backups.Gate.Set(); PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled);
+            Check(Control<TextBlock>(window, "BackupFeedback").Text.Contains("配置已恢复"), "Restore feedback missing");
+            backups.Hold = false;
+            Click(Control<Button>(window, "DeleteBackup")); Click(Control<Button>(window, "ConfirmBackup"));
+            PumpUntil(() => backups.Deleted == 1 && Control<Button>(window, "InstallButton").IsEnabled);
+            Equal(Control<ListBox>(window, "BackupList").Items.Count, 0);
+            Equal(Control<TextBlock>(window, "EmptyBackups").Visibility, Visibility.Visible);
+            Check(!Control<Button>(window, "RestoreBackup").IsEnabled, "Restore enabled with no selection");
+            backups.Entries.Add(backups.Item); Click(Control<Button>(window, "RefreshBackups"));
+            backups.Fail = true;
+            Click(Control<Button>(window, "RestoreBackup")); Click(Control<Button>(window, "ConfirmBackup"));
+            PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled);
+            Check(Control<TextBlock>(window, "BackupFeedback").Text.Contains("操作未完成"), "Restore error hidden");
+            Capture(window, "backups-error", 820, 680, 96);
+        }
+        finally { backups.Gate.Set(); PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled); window.Close(); }
+    }
+    private sealed class FakeBackups : IBackupStore
+    {
+        public string Root { get; private set; }
+        public List<BackupEntry> Entries = new List<BackupEntry>();
+        public BackupEntry Item;
+        public volatile int Restored, Deleted;
+        public bool Hold, Fail;
+        public ManualResetEventSlim Gate = new ManualResetEventSlim(false);
+        public FakeBackups()
+        {
+            Root = Path.Combine(output, "fake-backup-manager");
+            Item = new BackupEntry { Path = Path.Combine(Root, "20261106-120000-fixture"), Label = "2026-11-06 12:00:00 · 安装前备份", Summary = "Wand 用户配置", CanRestore = true };
+            Entries.Add(Item);
+        }
+        public IList<BackupEntry> List() { return Entries.ToList(); }
+        public string Restore(string path)
+        {
+            Restored++; if (Hold && !Gate.Wait(10000)) throw new TimeoutException(); if (Fail) throw new IOException("fixture restore failed"); return path;
+        }
+        public void Delete(string path) { Deleted++; Entries.Clear(); }
     }
 
     private static T Control<T>(InstallerWindow window, string name) where T : class { return (T)window.FindName(name); }
@@ -457,8 +662,10 @@ internal static class InstallerTests
             Equal(Control<TextBlock>(window, "NoScriptsText").Visibility, Visibility.Collapsed);
             ui.Files = new[] { Path.Combine(output, "missing.txt") }; Click(add);
             Equal(model.Options.Scripts.Count, 2); Check(Control<Expander>(window, "LogExpander").IsExpanded, "Invalid selection hidden");
+            Control<Expander>(window, "OptionsExpander").IsExpanded = true; SettleSections(window);
             ui.SelectionError = true; Click(add);
             Check(Control<TextBox>(window, "Details").Text.Contains("dialog unavailable"), "File dialog failure was not shown");
+            Control<Expander>(window, "OptionsExpander").IsExpanded = true; SettleSections(window);
             var remove = Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().First();
             Equal(System.Windows.Automation.AutomationProperties.GetName(remove), "移除脚本 " + Path.GetFileName(script));
             Click(remove); window.UpdateLayout(); Equal(model.Options.Scripts.Count, 1);
@@ -499,7 +706,7 @@ internal static class InstallerTests
                 Equal(Control<Button>(window, name).Visibility, Visibility.Visible);
                 Click(Control<Button>(window, name));
             }
-            Equal(ui.Opened[0], ui.Session.LogPath); Equal(ui.Opened[1], ui.Session.BackupPath);
+            Equal(ui.Opened[0], ui.Session.LogPath); Check(Control<Expander>(window, "BackupsExpander").IsExpanded, "Backup manager did not open");
             var forum = Control<Hyperlink>(window, "ForumLink");
             var navigate = new RequestNavigateEventArgs(forum.NavigateUri, "") { RoutedEvent = Hyperlink.RequestNavigateEvent };
             forum.RaiseEvent(navigate); Check(navigate.Handled, "Forum event not handled"); Equal(ui.Opened.Last(), "https://bbs.gbtgame.me/");
@@ -507,8 +714,8 @@ internal static class InstallerTests
             ui.OpenError = true; Click(Control<Button>(window, "OpenLog"));
             Check(Control<TextBox>(window, "Details").Text.Contains("无法打开："), "Open failure invisible"); ui.OpenError = false;
             Capture(window, "buttons-error", 820, 680, 96);
-            var logBounds = Control<TextBox>(window, "Details").TransformToAncestor(Control<ScrollViewer>(window, "SettingsScroll")).TransformBounds(new Rect(Control<TextBox>(window, "Details").RenderSize));
-            Check(logBounds.Top >= 0 && logBounds.Bottom <= Control<ScrollViewer>(window, "SettingsScroll").ViewportHeight + 1, "Expanded failure log was left outside the viewport");
+            var logBounds = Control<TextBox>(window, "Details").TransformToAncestor(Control<Grid>(window, "ContentSections")).TransformBounds(new Rect(Control<TextBox>(window, "Details").RenderSize));
+            Check(logBounds.Top >= 0 && logBounds.Bottom <= Control<Grid>(window, "ContentSections").ActualHeight + 1, "Log section left the fixed content viewport");
             ui.Hold = true; ui.Fail = false;
             Click(Control<Button>(window, "InstallButton")); Equal(ui.Created, 2);
             Equal(Control<Button>(window, "OpenLog").Visibility, Visibility.Collapsed);
@@ -553,7 +760,7 @@ internal static class InstallerTests
                 string script = Path.Combine(output, "很长的自定义脚本名称_" + new string('测', 70) + i + ".js");
                 File.WriteAllText(script, "void 0;"); model.Options.AddScript(script);
             }
-            Control<Expander>(window, "LogExpander").IsExpanded = true;
+            Control<Expander>(window, "OptionsExpander").IsExpanded = true;
             Control<TextBox>(window, "Details").Text = string.Join("\n", Enumerable.Repeat("用于检查滚动和长日志显示的测试记录。", 100));
             Capture(window, "long-content-minimum", 820, 680, 96);
             var scripts = Control<ScrollViewer>(window, "ScriptScroll"); var settings = Control<ScrollViewer>(window, "SettingsScroll");
@@ -562,6 +769,9 @@ internal static class InstallerTests
             Check(scripts.VerticalOffset > 0 && settings.VerticalOffset > 0, "Hidden scrollbar also disabled scrolling");
             Check(Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().All(b => b.ActualWidth >= 36), "Long filename squeezed remove controls");
             Capture(window, "long-content-scrolled", 820, 680, 96);
+            Control<Expander>(window, "LogExpander").IsExpanded = true;
+            Capture(window, "long-log", 820, 680, 96);
+            Check(!Control<Expander>(window, "OptionsExpander").IsExpanded, "Log did not collapse options");
             window.WindowState = WindowState.Maximized; window.UpdateLayout();
             Check(Control<Button>(window, "InstallButton").ActualWidth >= 118, "Maximized action collapsed");
             window.WindowState = WindowState.Normal;
@@ -624,13 +834,14 @@ internal static class InstallerTests
         window.Dispatcher.Invoke(DispatcherPriority.ApplicationIdle, new Action(() => {}));
         window.Dispatcher.Invoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() => {}));
         window.UpdateLayout();
+        SettleSections(window);
         var message = (TextBlock)window.FindName("MessageText");
         Check(((FrameworkElement)window.FindName("StatusPanel")).ActualHeight < 145, "Status block is too large: " + name);
         Check(message.ActualHeight >= 15, "Status message lost its layout space: " + name);
-        foreach (string controlName in new[] { "InstallButton", "Launch", "AuthorText", "StatusPanel", "SettingsScroll", "OpenLog", "OpenBackup" })
+        foreach (string controlName in new[] { "InstallButton", "Launch", "AuthorText", "StatusPanel", "ContentSections", "OpenLog", "OpenBackup", "RestoreBackup", "DeleteBackup", "RefreshBackups", "ConfirmBackup", "CancelBackup", "BackupsExpander", "LogExpander" })
         {
             var control = (FrameworkElement)window.FindName(controlName);
-            if (control.Visibility != Visibility.Visible) continue;
+            if (!control.IsVisible) continue;
             var point = control.TranslatePoint(new Point(), window);
             Check(control.ActualWidth > 0 && control.ActualHeight > 0 && point.X >= 0 && point.Y >= 0 && point.X + control.ActualWidth <= window.ActualWidth && point.Y + control.ActualHeight <= window.ActualHeight, "Control clipped: " + name + "/" + controlName);
         }

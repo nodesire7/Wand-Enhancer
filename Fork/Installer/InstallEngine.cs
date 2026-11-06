@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -234,7 +234,7 @@ namespace WandEnhancer.Fork.Installer
                                 File.WriteAllText(Path.Combine(backup, brand + "-" + view + "-protocol-" + protocol++ + ".json"), Json.Serialize(Snapshot(entry)));
                     }
             }
-            File.WriteAllText(Path.Combine(backup, "说明.txt"), "此目录保存安装前的 Roaming 配置和相关 HKCU 注册表快照（含值类型）。日志位于相邻 logs 目录。旧安装程序文件不在备份内。注册表 JSON 仅供人工检查和恢复。\r\n");
+            File.WriteAllText(Path.Combine(backup, "说明.txt"), "此目录保存安装前的 Roaming 配置和相关 HKCU 注册表快照（含值类型）。日志位于相邻 logs 目录。旧安装程序文件不在备份内。在安装助手的“配置备份”中可恢复 Roaming 与 HKCU Software 用户配置，或删除备份。旧安装注册、启动项及协议快照仅供检查。\r\n");
             Report(1, "配置备份：" + backup);
         }
 
@@ -296,7 +296,7 @@ namespace WandEnhancer.Fork.Installer
 
         internal static bool IsUnder(string path, string root) => Path.GetFullPath(path).StartsWith(Path.GetFullPath(root).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
 
-        private static void StopUnder(string root)
+        internal static void StopUnder(string root)
         {
             foreach (var process in Process.GetProcesses())
                 using (process)
