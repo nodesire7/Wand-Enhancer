@@ -17,3 +17,5 @@ Configuration backups always have a visible section header with a count. The sec
 Header clicks A/B/C select that section and collapse both others. Re-clicking the selected header keeps it open. Script pages show two complete filenames, backups show one full record and wrapped paths, and logs split at Unicode text-element boundaries into bounded pages. Full configuration selections and saved log data remain intact. Page controls replace wheel scrolling; empty/first/last pages disable invalid navigation.
 
 All three page controls share 26-DIP buttons, 11-DIP type, a 52-DIP minimum width and the same previous/next order and spacing.
+
+The same file is now an installer on first use and a launcher when compatible Wand files exist. Launch mode restores saved feature choices, labels its action Start Wand, and replaces destructive install stages with validation, preserved settings and function application. The native process title/sidebar identify launcher mode. Recheck is available while idle. Installation records are not trusted over actual files/version; missing or incompatible files stop a pending launch instead of falling through to installation.

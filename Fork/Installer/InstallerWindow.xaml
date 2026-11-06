@@ -85,7 +85,7 @@
         <Border Background="{DynamicResource Muted}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,1,0" Padding="22,25,18,22">
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                <StackPanel Margin="0,0,0,30"><TextBlock Text="GBTGAME" FontWeight="SemiBold" FontSize="15" /><TextBlock Text="Wand 安装助手" FontSize="11" Foreground="{DynamicResource MutedForeground}" Margin="0,5,0,0" /></StackPanel>
+                <StackPanel Margin="0,0,0,30"><TextBlock Text="GBTGAME" FontWeight="SemiBold" FontSize="15" /><TextBlock Text="{Binding ShellName}" FontSize="11" Foreground="{DynamicResource MutedForeground}" Margin="0,5,0,0" /></StackPanel>
                 <ItemsControl Grid.Row="1" ItemsSource="{Binding Stages}" VerticalAlignment="Top" AutomationProperties.Name="安装步骤">
                     <ItemsControl.ItemTemplate><DataTemplate>
                         <Grid Margin="0,0,0,20">
@@ -177,8 +177,8 @@
             </local:AccordionGrid>
             <StackPanel Grid.Row="3" Margin="0,12,0,0">
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal" VerticalAlignment="Center"><CheckBox x:Name="Launch" Style="{StaticResource OptionCheck}" IsChecked="True" Margin="0,0,8,0" AutomationProperties.Name="完成后启动 Wand" /><TextBlock Text="完成后启动 Wand" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /></StackPanel><Button x:Name="InstallButton" Grid.Column="1" Content="{Binding ActionText}" MinWidth="118" Style="{StaticResource InstallerPrimaryButton}" Click="InstallClick" IsDefault="True" AutomationProperties.AutomationId="InstallButton" /></Grid>
-                <TextBlock Text="安装将关闭并静默清理当前用户的旧版 Wand / WeMod。配置先备份，清理后需重新登录。" TextWrapping="Wrap" Foreground="{DynamicResource MutedForeground}" FontSize="10.5" LineHeight="17" Margin="0,12,0,0" />
-                <StackPanel Orientation="Horizontal" Margin="0,8,0,0"><Button x:Name="OpenLog" Content="打开日志" Click="OpenLogClick" Style="{StaticResource InstallerButton}" FontSize="11" Margin="0,0,8,0" Visibility="Collapsed" /><Button x:Name="OpenBackup" Content="管理备份" Click="OpenBackupClick" Style="{StaticResource InstallerButton}" FontSize="11" Visibility="Collapsed" /></StackPanel>
+                <TextBlock Text="首次安装会备份并清理旧版；已安装时关闭 Wand、应用功能并启动，保留现有安装和用户配置。" TextWrapping="Wrap" Foreground="{DynamicResource MutedForeground}" FontSize="10.5" LineHeight="17" Margin="0,12,0,0" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0"><Button x:Name="RefreshInstallation" Content="重新检测" Click="RefreshInstallationClick" Style="{StaticResource InstallerButton}" FontSize="11" Margin="0,0,8,0" /><Button x:Name="OpenLog" Content="打开日志" Click="OpenLogClick" Style="{StaticResource InstallerButton}" FontSize="11" Margin="0,0,8,0" Visibility="Collapsed" /><Button x:Name="OpenBackup" Content="管理备份" Click="OpenBackupClick" Style="{StaticResource InstallerButton}" FontSize="11" Visibility="Collapsed" /></StackPanel>
             </StackPanel>
         </Grid>
     </Grid>

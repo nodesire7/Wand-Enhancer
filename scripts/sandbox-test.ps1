@@ -1,4 +1,4 @@
-param([string]$OutputDirectory = 'C:\WandTest\Output')
+﻿param([string]$OutputDirectory = 'C:\WandTest\Output')
 $ErrorActionPreference = 'Stop'
 if ($env:USERNAME -ne 'WDAGUtilityAccount' -or $PSScriptRoot -ne 'C:\WandTest\Input') {
     throw 'This destructive acceptance test is restricted to the generated Windows Sandbox environment.'
@@ -45,6 +45,17 @@ try {
     [IO.File]::WriteAllText((Join-Path $roaming 'sandbox-old-settings.txt'), 'preserve-me')
     New-Item 'HKCU:\Software\Wand' -Force | Out-Null
     Set-ItemProperty 'HKCU:\Software\Wand' -Name SandboxOldValue -Value 'preserve-me'
+    $keepFile = Join-Path $root 'launcher-keep.txt'
+    [IO.File]::WriteAllText($keepFile, 'keep-existing-install')
+    $backupRoot = Join-Path $env:LOCALAPPDATA 'GBTGAME\WandSetup\backups'
+    $backupCount = @(Get-ChildItem -LiteralPath $backupRoot -Directory).Count
+    [void](Invoke-TestExe 'WandSetup.exe' @('--start', '--no-launch'))
+    Assert ((Get-Content -Raw -LiteralPath $keepFile) -eq 'keep-existing-install') 'Launcher replaced the existing installation'
+    Assert (Test-Path -LiteralPath (Join-Path $roaming 'sandbox-old-settings.txt')) 'Launcher removed user configuration'
+    Assert ((Get-ItemProperty 'HKCU:\Software\Wand' -Name SandboxOldValue).SandboxOldValue -eq 'preserve-me') 'Launcher changed user registry settings'
+    Assert (@(Get-ChildItem -LiteralPath $backupRoot -Directory).Count -eq $backupCount) 'Launcher unexpectedly performed installation backup'
+    Assert (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'GBTGAME\WandSetup\installation.json')) 'Installation state was not recorded'
+    $checks.Add('repeat launcher preserves install, user files and registry without reinstall')
     $reinstall = Invoke-TestExe 'WandSetup.exe' @('--install', '--no-launch')
     Assert (Test-Path -LiteralPath (Join-Path $reinstall.backupPath 'Roaming\Wand\sandbox-old-settings.txt')) 'Old settings backup missing'
     Assert (-not (Test-Path -LiteralPath (Join-Path $roaming 'sandbox-old-settings.txt'))) 'Old settings were not cleaned'

@@ -44,7 +44,9 @@ namespace WandEnhancer.Fork.Installer
             BackupRootText.Text = this.backups.Root;
             BackupRootText.ToolTip = this.backups.Root;
             model = new InstallerViewModel(InstallEngine.LoadPackage().version);
+            model.Configure(interaction.InspectInstallation());
             DataContext = model;
+            Title = "GBTGAME · " + model.ShellName;
             RenderLogPage();
             AuthorText.Text = "作者  " + BrandingInfo.Author;
             ForumText.Text = new Uri(BrandingInfo.ForumUrl).Host.ToLowerInvariant();
@@ -53,7 +55,7 @@ namespace WandEnhancer.Fork.Installer
             Closing += OnClosing;
             BackupsExpander.Collapsed += (sender, args) => { if (!BackupsExpander.IsExpanded && pendingBackupAction != null && !backupBusy) CancelBackupClick(sender, args); };
             PreviewKeyDown += (sender, args) => { if (args.Key == Key.Escape && pendingBackupAction != null && !backupBusy) { CancelBackupClick(sender, args); args.Handled = true; } };
-            Loaded += (sender, args) => { StrategyBox.Focus(); ReloadBackups(); };
+            Loaded += (sender, args) => { StrategyBox.Focus(); ReloadBackups(); ModelChanged(model, new PropertyChangedEventArgs(nameof(InstallerViewModel.State))); };
             SourceInitialized += (sender, args) =>
             {
                 int dark = 1;
@@ -65,7 +67,8 @@ namespace WandEnhancer.Fork.Installer
         {
             if (args.PropertyName != nameof(InstallerViewModel.State)) return;
             UpdateControls();
-            StatusTitle.Text = model.State == "Success" ? "安装完成" : model.State == "Error" ? "需要处理一个问题" : model.IsBusy ? "安装进行中" : "准备就绪";
+            Title = "GBTGAME · " + model.ShellName;
+            StatusTitle.Text = model.State == "Success" ? (model.UseExisting ? "启动完成" : "安装完成") : model.State == "Error" ? "需要处理一个问题" : model.IsBusy ? (model.UseExisting ? "正在准备启动" : "安装进行中") : model.UseExisting ? "已安装，可直接启动" : "准备就绪";
             MessageText.Foreground = (Brush)FindResource(model.State == "Error" ? "Destructive" : "MutedForeground");
         }
 
@@ -73,6 +76,9 @@ namespace WandEnhancer.Fork.Installer
         {
             if (backupBusy || pendingBackupAction != null) return;
             if (model.State == "Success") { Close(); return; }
+            var current = interaction.InspectInstallation();
+            if (model.UseExisting && !current.Exists) current = new LauncherSnapshot { Exists = true, Error = "原安装已不存在，已停止启动。请先重新检测，不会自动重装。" };
+            model.Configure(current, false);
             if (!model.Begin()) return;
             logText.Clear(); logPages = new List<string> { "" }; logPage = 0; RenderLogPage();
             OpenLog.Visibility = OpenBackup.Visibility = Visibility.Collapsed;
@@ -86,7 +92,7 @@ namespace WandEnhancer.Fork.Installer
                     model.Report(step, text);
                     AppendLog(text);
                 }), config);
-                await Task.Run(() => engine.Install(launch));
+                await Task.Run(() => { if (model.UseExisting) engine.StartExisting(launch); else engine.Install(launch); });
                 model.Succeed(launch);
             }
             catch (Exception error)
@@ -94,7 +100,7 @@ namespace WandEnhancer.Fork.Installer
                 try { engine?.RecordFailure(error); }
                 catch (Exception logError) { AppendLog("无法保存错误日志：" + logError.Message); }
                 model.Fail(error.Message);
-                AppendLog("安装已停止：" + error.Message);
+                AppendLog((model.UseExisting ? "启动已停止：" : "安装已停止：") + error.Message);
                 ShowLog();
             }
             finally
@@ -161,7 +167,8 @@ namespace WandEnhancer.Fork.Installer
         private void UpdateControls()
         {
             bool busy = model.IsBusy || backupBusy;
-            InstallButton.IsEnabled = !busy && pendingBackupAction == null;
+            InstallButton.IsEnabled = !busy && pendingBackupAction == null && model.CanRun;
+            RefreshInstallation.IsEnabled = !busy && pendingBackupAction == null;
             OptionsEditor.IsEnabled = !busy && model.State != "Success";
             Launch.IsEnabled = !busy && model.State != "Success";
             BackupList.IsEnabled = !busy && pendingBackupAction == null;
@@ -259,6 +266,13 @@ namespace WandEnhancer.Fork.Installer
             if (!model.IsBusy && !backupBusy) return;
             args.Cancel = true;
             AppendLog(backupBusy ? "正在处理备份，请等待当前操作结束后关闭窗口。" : "正在安装，请等待当前流程结束后关闭窗口。");
+        }
+
+        private void RefreshInstallationClick(object sender, RoutedEventArgs args)
+        {
+            if (model.IsBusy || backupBusy || pendingBackupAction != null) return;
+            model.Configure(interaction.InspectInstallation(), false);
+            Title = "GBTGAME · " + model.ShellName;
         }
 
         private void OpenLogClick(object sender, RoutedEventArgs args) => Open(logPath);

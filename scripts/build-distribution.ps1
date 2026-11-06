@@ -43,11 +43,11 @@ foreach ($oldName in @('WandEnhancer.exe', 'WandEnhancer.exe.sha256')) {
     if (Test-Path -LiteralPath $oldFile) { Remove-Item -LiteralPath $oldFile -Force }
 }
 $instruction = if ($WandInstallerPath) {
-    '双击 WandSetup.exe，点击[安装]。原版 Wand 安装包和本次构建的 CLI 均已内置。'
+    '双击安装/启动工具。未安装时点击[安装]，已安装时点击[启动 Wand]。原版 Wand 安装包和本次构建的 CLI 均已内置。'
 } else {
     "把原版 $($package.fileName) 放在 WandSetup.exe 旁边，双击 WandSetup.exe，点击[安装]。CLI 已内置。"
 }
-$instruction += "`r`n安装前关闭 Wand 并保存进度。安装助手会备份 Roaming 配置和相关注册表，卸载清理当前用户的默认安装，再安装、应用修改并启动。`r`n备份与日志：%LOCALAPPDATA%\GBTGAME\WandSetup`r`n自定义位置和系统级旧版需先手动卸载。`r`nCLI 说明见 Fork/README.md。"
+$instruction += "`r`n首次安装前关闭 Wand 并保存进度。首次安装会备份配置并清理旧版；此后只重新应用功能并启动，保留现有安装与配置。安装状态和功能设置保存于 %LOCALAPPDATA%\GBTGAME\WandSetup\installation.json。启动后无需重复安装。`r`n备份与日志：%LOCALAPPDATA%\GBTGAME\WandSetup`r`n自定义位置和系统级旧版需先手动卸载。`r`nCLI 说明见 Fork/README.md。"
 [IO.File]::WriteAllText((Join-Path $output '使用说明.txt'), $instruction, [Text.UTF8Encoding]::new($true))
 $hashes = @('WandSetup.exe') | ForEach-Object {
     $fileHash = (Get-FileHash -LiteralPath (Join-Path $output $_) -Algorithm SHA256).Hash.ToLowerInvariant()

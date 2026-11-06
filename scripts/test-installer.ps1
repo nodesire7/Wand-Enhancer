@@ -1,4 +1,4 @@
-param([string]$OutputDirectory)
+﻿param([string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root '.tmp\installer-tests' }
@@ -56,7 +56,7 @@ Write-Host 'PASS installer process mutex and JSON error responses'
 $proxy = [Diagnostics.Process]::new()
 $proxyDirectory = Join-Path $OutputDirectory ('standalone-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($proxyDirectory) | Out-Null
-$proxyExe = Join-Path $proxyDirectory 'WandSetup.exe'
+$proxyExe = Join-Path $proxyDirectory '【BBS.GBTGAME.ME】Wemod(Wand)全功能解锁版 v12.68.0.exe'
 Copy-Item -LiteralPath $assembly -Destination $proxyExe
 $proxy.StartInfo = [Diagnostics.ProcessStartInfo]::new($proxyExe, '--cli version')
 $proxy.StartInfo.WorkingDirectory = $proxyDirectory
@@ -74,3 +74,14 @@ try {
     Write-Host 'PASS standalone setup calls its embedded CLI without an adjacent enhancer EXE'
 } finally { $proxy.Dispose() }
 Write-Host "Installer test report and state captures: $OutputDirectory"
+
+$renamedGui = [Diagnostics.Process]::Start([Diagnostics.ProcessStartInfo]::new($proxyExe))
+try {
+    if ($renamedGui.WaitForExit(3000)) { throw 'Renamed standalone GUI exited during startup.' }
+    $renamedGui.Refresh()
+    if ($renamedGui.MainWindowHandle -eq [IntPtr]::Zero -or $renamedGui.MainWindowTitle -notmatch '^GBTGAME · Wand (安装助手|启动器)$') { throw 'Renamed standalone GUI did not create its own window.' }
+    Write-Host 'PASS original Chinese distribution filename starts the GUI and embedded CLI'
+} finally {
+    if (-not $renamedGui.HasExited) { $renamedGui.Kill(); $renamedGui.WaitForExit(5000) | Out-Null }
+    $renamedGui.Dispose()
+}

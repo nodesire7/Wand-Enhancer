@@ -21,7 +21,7 @@ namespace WandEnhancer.Fork.Installer
         public string arguments { get; set; }
     }
 
-    internal sealed class InstallEngine : IInstallerSession, IInstallSteps
+    internal sealed class InstallEngine : IInstallerSession, IInstallSteps, IExistingInstallSteps
     {
         internal static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 64 * 1024 * 1024 };
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -98,12 +98,41 @@ namespace WandEnhancer.Fork.Installer
 
         public void Install(bool launchAfter = true)
         {
+            OpenLog();
+            InstallWorkflow.Run(this, launchAfter, package.version, Report);
+        }
+
+        public void StartExisting(bool launchAfter = true)
+        {
+            OpenLog();
+            ExistingInstallWorkflow.Run(this, launchAfter, Report);
+        }
+        private void OpenLog()
+        {
             string logDir = Path.Combine(local, "GBTGAME", "WandSetup", "logs");
             Directory.CreateDirectory(logDir);
             logFile = Path.Combine(logDir, DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N") + ".log");
             log = new StreamWriter(logFile) { AutoFlush = true };
-            InstallWorkflow.Run(this, launchAfter, package.version, Report);
         }
+        void IExistingInstallSteps.ValidateExisting()
+        {
+            PatchConfigs.Validate(selectedConfig);
+            var status = new LauncherStateStore().Inspect();
+            if (!status.Exists || !status.CanRun) throw new InvalidOperationException(status.Error ?? "未找到 Wand，请先执行首次安装。");
+        }
+        void IExistingInstallSteps.PrepareExisting()
+        {
+            preparedConfig = PatchScriptStore.Copy(selectedConfig, Path.Combine(scratch, "selected-scripts"));
+            enhancer = Path.Combine(scratch, "WandEnhancer.exe"); Extract("WandEnhancerPayload", enhancer);
+            var protocol = Cli("version");
+            var data = protocol["data"] as Dictionary<string, object>;
+            if (data == null || Convert.ToInt32(data["cliVersion"]) != 1) throw new InvalidDataException("CLI 协议不兼容。");
+            Cli("status", "--path", Path.Combine(local, "Wand"), "--expected-version", package.version);
+        }
+        void IExistingInstallSteps.Patch() => ((IInstallSteps)this).Patch();
+        bool IExistingInstallSteps.Verify() => ((IInstallSteps)this).Verify();
+        void IExistingInstallSteps.Launch() => ((IInstallSteps)this).Launch();
+        public void SaveState() => new LauncherStateStore().Save(preparedConfig);
 
         void IInstallSteps.Validate() => Preflight();
 

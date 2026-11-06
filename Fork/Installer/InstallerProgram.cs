@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Threading;
@@ -14,7 +14,8 @@ namespace WandEnhancer.Fork.Installer
             if (args.Length > 0 && args[0] == "--cli") return EmbeddedCli.Run(args);
             bool check = args.Length == 1 && args[0] == "--check";
             bool install = (args.Length == 1 || (args.Length == 2 && args[1] == "--no-launch")) && args[0] == "--install";
-            if (check || install)
+            bool start = (args.Length == 1 || (args.Length == 2 && args[1] == "--no-launch")) && args[0] == "--start";
+            if (check || install || start)
             {
                 Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), new System.Text.UTF8Encoding(false)) { AutoFlush = true });
                 using (var mutex = new Mutex(true, "Local\\GBTGAME.WandSetup", out bool first))
@@ -27,11 +28,14 @@ namespace WandEnhancer.Fork.Installer
                 try
                 {
                     var reports = new List<object>();
-                    using (var engine = new InstallEngine((step, text) => reports.Add(new { step, message = text })))
+                    var saved = start ? new LauncherStateStore().Inspect() : null;
+                    if (start && (!saved.Exists || !saved.CanRun)) throw new InvalidOperationException(saved.Error ?? "未找到 Wand，请先首次安装；启动命令不会自动重装。");
+                    using (var engine = new InstallEngine((step, text) => reports.Add(new { step, message = text }), saved?.Config))
                     {
                         try
                         {
                             if (check) engine.Preflight();
+                            else if (start) engine.StartExisting(args.Length == 1);
                             else engine.Install(args.Length == 1);
                         }
                         catch (Exception error)
@@ -42,7 +46,7 @@ namespace WandEnhancer.Fork.Installer
                             return 1;
                         }
                         Console.WriteLine(InstallEngine.Json.Serialize(new { schemaVersion = 1, success = true, code = 0,
-                            message = check ? "Payloads verified; no installation changed." : "Installation completed.",
+                            message = check ? "Payloads verified; no installation changed." : start ? "Existing installation prepared; no reinstall performed." : "Installation completed.",
                             logPath = engine.LogPath, backupPath = engine.BackupPath, reports }));
                         return 0;
                     }

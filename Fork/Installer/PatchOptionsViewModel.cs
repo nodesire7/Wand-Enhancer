@@ -47,6 +47,19 @@ namespace WandEnhancer.Fork.Installer
             RemotePanel = true;
         }
 
+        public void Load(PatchConfig config)
+        {
+            Strategy = config.Strategy;
+            ActivatePro = config.PatchTypes.Contains(EPatchType.ActivatePro);
+            DevTools = config.PatchTypes.Contains(EPatchType.DevToolsOnF12);
+            DisableUpdates = config.PatchTypes.Contains(EPatchType.DisableUpdates);
+            RemotePanel = config.PatchTypes.Contains(EPatchType.RemoteWebPanelPreview);
+            AutoApply = config.AutoApplyAfterUpdate;
+            Scripts.Clear();
+            foreach (string path in config.CustomScriptPaths ?? new List<string>()) Scripts.Add(new SelectedScript(path));
+            MoveScriptPage(-int.MaxValue);
+        }
+
         public PatchConfig Snapshot()
         {
             var types = new HashSet<EPatchType>();

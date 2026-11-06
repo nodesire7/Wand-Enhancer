@@ -27,3 +27,5 @@ The user confirmed GBTGAME branding, simplified Chinese, a modern practical inte
 Make saved configuration backups discoverable across restarts, allow recovery and deletion, and preserve a recovery point before replacing current settings. Sections fold instead of scrolling the status out of view.
 
 Use one selected accordion section at a time, identical header/body dimensions, and complete visible pages without scrolling. Page through scripts, backups and log history without dropping data.
+
+After installation, reopen the same executable as a launcher. Preserve its user-chosen filename and saved feature selections. Reapply and verify features on each launcher start without uninstalling or reinstalling a compatible existing Wand installation.

@@ -22,7 +22,7 @@ internal static class InstallerTests
     private static int passed;
     private static string output;
     private static string corePath;
-    private static readonly string[] Order = { "validate", "backup", "remove", "install", "patch", "verify", "launch" };
+    private static readonly string[] Order = { "validate", "backup", "remove", "install", "patch", "verify", "state", "launch" };
 
     [STAThread]
     private static int Main(string[] args)
@@ -86,7 +86,7 @@ internal static class InstallerTests
             Test("launch opt-out still verifies the patch", () => {
                 var fake = new FakeSteps();
                 InstallWorkflow.Run(fake, false, "12.68.0", (step, text) => {});
-                Equal(string.Join(",", fake.Calls), string.Join(",", Order.Take(6)));
+                Equal(string.Join(",", fake.Calls), string.Join(",", Order.Take(7)));
             });
             Test("busy state rejects double activation and retry resets failed steps", () => {
                 var model = new InstallerViewModel("12.68.0");
@@ -154,6 +154,8 @@ internal static class InstallerTests
                 }
                 finally { if (!process.HasExited) { process.Kill(); process.WaitForExit(5000); } }
             });
+            Test("existing installation applies, verifies, saves and launches without reinstall", TestExistingWorkflow);
+            Test("installation records survive restarts, corruption and version changes", TestLauncherState);
             Test("backup restore, automatic recovery, deletion boundaries and rollback", TestBackupStore);
             Test("settings registry round-trip preserves value kinds and rejects other keys", TestSettingsRestore);
             Test("WPF default, busy, failure, success, minimum size and DPI layouts", TestWindow);
@@ -339,7 +341,7 @@ internal static class InstallerTests
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
         try
         {
-            var window = new InstallerWindow();
+            var window = new InstallerWindow(new FakeInteraction());
             window.Show();
             try
             {
@@ -369,6 +371,7 @@ internal static class InstallerTests
                 Capture(window, "dpi-200", 960, 860, 192);
             }
             finally { window.Close(); }
+            Test("reopening after installation offers launch without reinstall", TestReopenedLauncher);
             Test("all option controls bind, update choices exclude each other, keyboard focus is visible", TestOptionControls);
             Test("script dialog cancel, multiple, duplicate, invalid, failure and remove buttons", TestScriptControls);
             Test("install, busy guard, log, backup, forum, failure, retry and finish buttons", TestWorkflowControls);
@@ -385,6 +388,76 @@ internal static class InstallerTests
     {
         bool failed = false; try { action(); } catch { failed = true; } Check(failed, "Unsafe operation was accepted");
     }
+
+    private static void TestExistingWorkflow()
+    {
+        string[] order = { "validate", "prepare", "patch", "verify", "state", "launch" };
+        var fake = new ExistingSteps();
+        ExistingInstallWorkflow.Run(fake, true, (step, message) => {});
+        Equal(string.Join(",", fake.Calls), string.Join(",", order));
+        foreach (string failure in order)
+        {
+            fake = new ExistingSteps { FailAt = failure };
+            bool complete = false;
+            ThrowsAny(() => ExistingInstallWorkflow.Run(fake, true, (step, message) => complete |= step == 6));
+            Equal(fake.Calls.Count, Array.IndexOf(order, failure) + 1); Check(!complete, "Failed existing launch reported success");
+        }
+        fake = new ExistingSteps { Verified = false };
+        ThrowsAny(() => ExistingInstallWorkflow.Run(fake, true, (step, message) => {}));
+        Check(!fake.Calls.Contains("state") && !fake.Calls.Contains("launch"), "Unverified changes recorded or launched");
+        fake = new ExistingSteps(); ExistingInstallWorkflow.Run(fake, false, (step, message) => {});
+        Equal(string.Join(",", fake.Calls), string.Join(",", order.Take(5)));
+    }
+    private sealed class ExistingSteps : IExistingInstallSteps
+    {
+        public List<string> Calls = new List<string>(); public string FailAt; public bool Verified = true;
+        private void Call(string value) { Calls.Add(value); if (FailAt == value) throw new IOException("fixture " + value); }
+        public void ValidateExisting() { Call("validate"); } public void PrepareExisting() { Call("prepare"); }
+        public void Patch() { Call("patch"); } public bool Verify() { Call("verify"); return Verified; }
+        public void SaveState() { Call("state"); } public void Launch() { Call("launch"); }
+    }
+    private static void TestLauncherState()
+    {
+        string fixture = Path.Combine(output, "launcher-state-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(fixture, "Wand"), state = Path.Combine(fixture, "Data", "installation.json");
+        var store = new LauncherStateStore(root, state, "12.68.0", file => "12.68.0.0");
+        try
+        {
+            Check(!store.Inspect().Exists, "Missing installation was treated as ready");
+            string app = Path.Combine(root, "app-12.68.0"), resources = Path.Combine(app, "resources");
+            Directory.CreateDirectory(Path.Combine(resources, "app.asar.unpacked"));
+            File.WriteAllText(Path.Combine(app, "Wand.exe"), "fixture"); File.WriteAllText(Path.Combine(resources, "app.asar"), "fixture");
+            Check(store.Inspect().Exists && store.Inspect().CanRun, "Existing legacy installation requires reinstall");
+            var config = new PatchOptionsViewModel { Strategy = EPatchStrategy.Supervised, DevTools = true, AutoApply = true }.Snapshot();
+            store.Save(config);
+            var reopened = new LauncherStateStore(root, state, "12.68.0", file => "12.68.0");
+            var snapshot = reopened.Inspect(); Check(snapshot.Config != null, "Saved selection could not be read: " + snapshot.Message + snapshot.Error); Check(snapshot.CanRun && snapshot.Config.AutoApplyAfterUpdate, "Persisted selection missing");
+            Equal(snapshot.Config.Strategy, EPatchStrategy.Supervised); Check(snapshot.Config.PatchTypes.Contains(EPatchType.DevToolsOnF12), "Saved devtools lost");
+            string script = Path.Combine(fixture, "保留脚本.js"); File.WriteAllText(script, "void 0;");
+            config.PatchTypes.Add(EPatchType.RemoteWebPanelPreview); config.CustomScriptPaths.Add(script);
+            reopened.Save(config); File.Delete(script);
+            var missingScript = reopened.Inspect();
+            Check(missingScript.Exists && missingScript.CanRun && missingScript.Config.CustomScriptPaths.Single() == script, "Missing script must not discard installation or saved choices");
+            var loaded = new PatchOptionsViewModel(); loaded.Load(missingScript.Config); ThrowsAny(() => loaded.Snapshot());
+            File.WriteAllText(script, "void 0;");
+            reopened.Save(config); Check(!Directory.GetFiles(Path.GetDirectoryName(state), "*.tmp").Any(), "Atomic-write temporary file remains");
+            File.WriteAllText(state, "broken json");
+            Check(reopened.Inspect().Exists && reopened.Inspect().CanRun, "Corrupt record should not reinstall an existing app");
+            File.Delete(state);
+            File.WriteAllText(Path.Combine(root, "enhancer.json"), InstallEngine.Json.Serialize(config));
+            Equal(reopened.Inspect().Config.Strategy, EPatchStrategy.Supervised);
+            string newer = Path.Combine(root, "app-13.0.0"); Directory.CreateDirectory(Path.Combine(newer, "resources", "app.asar.unpacked"));
+            File.WriteAllText(Path.Combine(newer, "Wand.exe"), "fixture"); File.WriteAllText(Path.Combine(newer, "resources", "app.asar"), "fixture");
+            Check(reopened.Inspect().Exists && !reopened.Inspect().CanRun, "New version must block without downgrade/reinstall");
+            Directory.Delete(newer, true);
+            Check(!new LauncherStateStore(root, state, "12.68.0", file => "13.0.0").Inspect().CanRun, "Executable version replacement bypassed detection");
+            File.Delete(Path.Combine(app, "Wand.exe"));
+            Check(reopened.Inspect().Exists && !reopened.Inspect().CanRun, "Partial install must not trigger replacement");
+            Directory.Delete(app, true); Check(!reopened.Inspect().Exists, "Stale record was trusted after files were removed");
+        }
+        finally { if (Directory.Exists(fixture)) { BackupStore.Guard(fixture); Directory.Delete(fixture, true); } }
+    }
+
     private static void TestBackupStore()
     {
         string fixture = Path.Combine(output, "backup-store-" + Guid.NewGuid().ToString("N"));
@@ -494,6 +567,8 @@ internal static class InstallerTests
                 var control = Control<Expander>(window, section);
                 double height = control.IsExpanded ? Math.Max(40, host.ActualHeight - 80) : 40;
                 if (Math.Abs(control.ActualHeight - height) > 1) return false;
+                var body = control.Template.FindName("Body", control) as FrameworkElement;
+                if (body != null && (!control.IsExpanded && body.Visibility != Visibility.Collapsed || control.IsExpanded && Math.Abs(body.Opacity - 1) > 0.001)) return false;
             }
             return true;
         });
@@ -790,6 +865,44 @@ internal static class InstallerTests
         }
         finally { PumpUntil(() => !model.IsBusy); window.Close(); }
     }
+    private static void TestReopenedLauncher()
+    {
+        var ui = new FakeInteraction();
+        var first = new InstallerWindow(ui, new FakeBackups()); first.Show();
+        try
+        {
+            ((InstallerViewModel)first.DataContext).Options.DevTools = true;
+            ((InstallerViewModel)first.DataContext).Options.Strategy = EPatchStrategy.Supervised;
+            Click(Control<Button>(first, "InstallButton"));
+            PumpUntil(() => ((InstallerViewModel)first.DataContext).State == "Success" && ui.Session.Disposed);
+        }
+        finally { first.Close(); }
+        var reopened = new InstallerWindow(ui, new FakeBackups()); reopened.Show();
+        try
+        {
+            PumpUntil(() => reopened.IsLoaded);
+            Equal(Control<Button>(reopened, "InstallButton").Content, "启动 Wand");
+            Check(((InstallerViewModel)reopened.DataContext).Options.DevTools, "Saved features lost on reopen");
+            Equal(((InstallerViewModel)reopened.DataContext).Options.Strategy, EPatchStrategy.Supervised);
+            Capture(reopened, "launcher-ready", 900, 860, 96);
+            Click(Control<Button>(reopened, "InstallButton"));
+            PumpUntil(() => ((InstallerViewModel)reopened.DataContext).State == "Success" && ui.Session.Disposed);
+            Check(ui.Session.ExistingRun, "Reopen called installation instead of existing launch");
+        }
+        finally { reopened.Close(); }
+        var disappeared = new InstallerWindow(ui, new FakeBackups()); disappeared.Show();
+        try
+        {
+            int created = ui.Created; ui.Installed = false;
+            Click(Control<Button>(disappeared, "InstallButton"));
+            Equal(ui.Created, created);
+            Check(!Control<Button>(disappeared, "InstallButton").IsEnabled, "Vanished install silently fell back to reinstall");
+            Click(Control<Button>(disappeared, "RefreshInstallation"));
+            Equal(Control<Button>(disappeared, "InstallButton").Content, "安装");
+        }
+        finally { disappeared.Close(); }
+    }
+
     private static string AllLogs(InstallerWindow window)
     {
         var pages = (List<string>)typeof(InstallerWindow).GetField("logPages", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(window);
@@ -894,11 +1007,14 @@ internal static class InstallerTests
         public PatchConfig Config;
         public FakeSession Session;
         public List<string> Opened = new List<string>();
+        public bool Installed;
+        public PatchConfig SavedConfig;
+        public LauncherSnapshot InspectInstallation() { return new LauncherSnapshot { Exists = Installed, Version = "12.68.0", Config = SavedConfig == null ? null : WandEnhancer.Fork.PatchConfigs.Copy(SavedConfig) }; }
         public string[] SelectScripts(Window owner) { Selected++; if (SelectionError) throw new IOException("dialog unavailable"); return Files; }
         public void Open(string path) { if (OpenError) throw new IOException("file association unavailable"); Opened.Add(path); }
         public IInstallerSession CreateSession(Action<int, string> report, PatchConfig config)
         {
-            Created++; Config = config; Session = new FakeSession(report, Hold, Fail, LogError); return Session;
+            Created++; Config = config; Session = new FakeSession(report, Hold, Fail, LogError, () => { Installed = true; SavedConfig = WandEnhancer.Fork.PatchConfigs.Copy(config); }); return Session;
         }
     }
     private sealed class FakeSession : IInstallerSession
@@ -907,12 +1023,13 @@ internal static class InstallerTests
         private readonly bool fail, logError;
         public readonly ManualResetEventSlim Gate = new ManualResetEventSlim(false);
         public volatile bool Started;
-        public bool Disposed, FailureRecorded, Launched;
+        public bool Disposed, FailureRecorded, Launched, ExistingRun;
+        private readonly Action completed;
         public string LogPath { get; private set; }
         public string BackupPath { get; private set; }
-        public FakeSession(Action<int, string> report, bool hold, bool fail, bool logError)
+        public FakeSession(Action<int, string> report, bool hold, bool fail, bool logError, Action completed)
         {
-            this.report = report; this.fail = fail; this.logError = logError;
+            this.report = report; this.fail = fail; this.logError = logError; this.completed = completed;
             BackupPath = Path.Combine(output, "fake-backup"); Directory.CreateDirectory(BackupPath);
             LogPath = Path.Combine(BackupPath, "fixture.log"); File.WriteAllText(LogPath, "fixture only");
             if (!hold) Gate.Set();
@@ -922,8 +1039,9 @@ internal static class InstallerTests
             Started = true; Launched = launch; report(3, "测试安装进度，不会改动真实应用。");
             if (!Gate.Wait(10000)) throw new TimeoutException("Fixture release timed out");
             if (fail) throw new IOException("fixture install failure");
-            report(6, "测试安装完成。");
+            completed(); report(6, "测试安装完成。");
         }
+        public void StartExisting(bool launch) { ExistingRun = true; Install(launch); }
         public void RecordFailure(Exception error) { FailureRecorded = true; if (logError) throw new IOException("fixture log write failure"); }
         public void Dispose() { Disposed = true; Gate.Dispose(); if (logError) throw new IOException("fixture log close failure"); }
     }
@@ -976,6 +1094,7 @@ internal static class InstallerTests
         public void Install() { Call("install"); }
         public void Patch() { Call("patch"); }
         public bool Verify() { Call("verify"); return Verified; }
+        public void SaveState() { Call("state"); }
         public void Launch() { Call("launch"); }
     }
 }
