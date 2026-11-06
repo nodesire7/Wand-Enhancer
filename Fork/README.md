@@ -2,7 +2,7 @@
 
 用户交付文件只有 `WandSetup.exe`，已内置同一次构建的增强器与 CLI；完整离线版还内置 Wand 12.68.0 安装包。无需同目录的 WandEnhancer.exe，`WandSetup.exe --cli ...` 可直接使用内置 CLI。增强器版本来自上游 AssemblyVersion；JSON 同时返回源码构建号 `build`，CLI 协议版本为 `1`。
 
-安装助手直接复用 WandEnhancer 的颜色、按钮、勾选框和下拉框资源。与原增强器日志区一样，滚动条隐藏，保留滚轮滚动。状态区压缩为短进度条，主区域展示增强设置。作者 **A-FEI-** 与论坛 [bbs.gbtgame.me](https://bbs.gbtgame.me) 保留。
+安装助手直接复用 WandEnhancer 的颜色、按钮、勾选框和下拉框资源。三个分区采用统一外观，内容不滚动，长列表及日志通过翻页完整查看。状态区压缩为短进度条，主区域展示增强设置。作者 **A-FEI-** 与论坛 [bbs.gbtgame.me](https://bbs.gbtgame.me) 保留。
 
 ## 用户使用
 
