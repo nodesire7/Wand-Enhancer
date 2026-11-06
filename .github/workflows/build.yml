@@ -45,6 +45,7 @@ jobs:
         run: |
           ./scripts/build-distribution.ps1
           ./scripts/test-fork.ps1
+          ./scripts/test-installer.ps1
 
       - name: Upload unsigned executable
         uses: actions/upload-artifact@v6

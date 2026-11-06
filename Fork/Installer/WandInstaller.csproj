@@ -11,16 +11,22 @@
     <Optimize>true</Optimize>
     <ApplicationIcon>..\..\assets\appicon.ico</ApplicationIcon>
     <StartupObject>WandEnhancer.Fork.Installer.InstallerProgram</StartupObject>
+    <ProjectTypeGuids>{60dc8134-eba5-43b8-bcc9-bb4bc16c2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
     <EnhancerPath Condition="'$(EnhancerPath)' == ''">..\..\WandEnhancer\bin\$(Configuration)\WandEnhancer.exe</EnhancerPath>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
-    <Reference Include="System.Drawing" />
-    <Reference Include="System.Windows.Forms" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.Xaml" />
     <Reference Include="System.Web.Extensions" />
     <Compile Include="*.cs" />
     <Compile Include="..\Shared\Arguments.cs" />
+    <Compile Include="..\..\WandEnhancer\Branding\BrandingInfo.g.cs" />
+    <Page Include="InstallerWindow.xaml"><Generator>MSBuild:Compile</Generator></Page>
+    <Resource Include="..\..\assets\appicon.ico"><Link>Assets\appicon.ico</Link></Resource>
     <Compile Include="obj\$(Configuration)\AssemblyInfo.cs" />
     <EmbeddedResource Include="package.json"><LogicalName>WandPackage</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="$(EnhancerPath)"><LogicalName>WandEnhancerPayload</LogicalName></EmbeddedResource>

@@ -40,6 +40,10 @@ try {
     [void](Invoke-Cli @('status', '--patches', 'pro', '--path', $scratch) 2)
     [void](Invoke-Cli @('status', '--path', $scratch, '--path', $scratch) 2)
     [void](Invoke-Cli @('status', '--path', $scratch) 3)
+    [void](Invoke-Cli @('patch', '--path', $scratch, '--strategy', 'invalid') 2)
+    [void](Invoke-Cli @('restore', '--path', $scratch, '--auto-apply') 2)
+    [void](Invoke-Cli @('version', '--path', $scratch) 2)
+    [void](Invoke-Cli @('status', '--path', $scratch, '--unknown') 2)
 
     $install = Join-Path $scratch '中文 路径\app-12.68.0'
     $resources = Join-Path $install 'resources'
@@ -53,6 +57,7 @@ try {
     $status = Invoke-Cli @('status', '--path', $install, '--expected-version', '12.68.0')
     Assert ($status.data.patched -eq $false) 'Fresh fixture status'
     Assert ($status.data.path -eq $install) 'Unicode and spaces preserved'
+    [void](Invoke-Cli @('status', '--path', $install, '--expected-version', 'invalid') 2)
     [void](Invoke-Cli @('status', '--path', (Join-Path $install 'Wand.exe')))
     [void](Invoke-Cli @('status', '--path', (Split-Path $install -Parent)))
     [void](Invoke-Cli @('patch', '--path', $install, '--expected-version', '99.0.0') 4)
@@ -63,6 +68,14 @@ try {
     Assert ((Invoke-Cli @('status', '--path', $install)).data.patched -eq $true) 'Patched fixture status'
     [IO.File]::WriteAllText((Join-Path $resources '.incomplete-patch'), '')
     Assert ((Invoke-Cli @('status', '--path', $install)).data.patched -eq $false) 'Incomplete fixture status'
+
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $mutexSuffix = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($install.ToUpperInvariant()))).Replace('-', '') }
+    finally { $sha.Dispose() }
+    $mutex = [Threading.Mutex]::new($true, ('Local\GBTGAME.WandCli.' + $mutexSuffix))
+    try { [void](Invoke-Cli @('patch', '--path', $install) 6) }
+    finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
+    Assert ([IO.File]::ReadAllText((Join-Path $resources 'app.asar')) -eq 'fixture archive') 'Busy CLI must not mutate files'
 
     try {
         [void](Invoke-Cli @('launch', '--path', $install, '--strategy', 'static'))

@@ -20,4 +20,4 @@ Preserve the fork's upstream synchronization and GBTGAME branding. Reuse the exi
 
 ## Brand Commitments
 
-The user confirmed GBTGAME branding, simplified Chinese, and a simple practical interface.
+The user confirmed GBTGAME branding, simplified Chinese, a modern practical interface, author A-FEI-, and forum address bbs.gbtgame.me.

@@ -2,6 +2,8 @@
 
 本分支保留原有图形界面，并在同一个 `WandEnhancer.exe` 中提供 CLI。安装助手 `WandSetup.exe` 内置同一次构建的 CLI，避免调用错版本。增强器版本继续来自上游 AssemblyVersion；JSON 同时返回源码构建号 `build`，CLI 协议版本另为 `1`。
 
+安装助手采用现代 WPF 深色界面，固定显示作者 **A-FEI-** 与论坛 [bbs.gbtgame.me](https://bbs.gbtgame.me)。侧栏展示六个步骤，失败时展开日志并允许重试。
+
 ## 用户使用
 
 完整离线版只需双击 `WandSetup.exe`，点击 **安装**。默认执行：
@@ -61,6 +63,7 @@ Static 启动后 CLI 立即退出，应用不会继承 JSON 输出管道；Super
 .\build.ps1 -Configuration Release
 .\scripts\build-distribution.ps1 -WandInstallerPath 'F:\Soft\Wand\Wand-12.68.0.exe'
 .\scripts\test-fork.ps1
+.\scripts\test-installer.ps1
 ```
 
 输出 `dist\Release\WandSetup.exe` 为完整单文件安装工具，另提供 `WandEnhancer.exe`、中文说明与 SHA256SUMS。省略 `-WandInstallerPath` 构建需外置原版安装包的轻量版。修改 `Fork/Installer/package.json` 的版本、文件名与 SHA256 可切换目标安装包；必须先验证其兼容性及静默行为，不能只改文件名。
@@ -74,3 +77,19 @@ Static 启动后 CLI 立即退出，应用不会继承 JSON 输出管道；Super
 本次另用提供的 12.68.0 原版安装包解出的临时副本进行了 Static 修改、全部顶层 JavaScript 语法检查与恢复校验：修改成功，恢复后全部 233 个原始文件 SHA256 一致。测试使用独立品牌名，避免停止真实 Wand 进程。
 
 对真实 12.68.0 的首次安装、旧版卸载重装及游戏功能，发布前需在一次性 Windows 虚拟机中验收；`--silent` 的无首启行为依据 Squirrel 的安装流程，实际捆绑版本仍需该验收。自动化测试不能证明 Pro 账号状态或所有游戏效果。
+
+## 隔离验收与完整测试
+
+`test-installer.ps1` 检查 18 组安装编排、失败拦截、注册表快照、参数引号往返、独立 GUI 启动及窗口状态，另检查轻量版缺失／损坏载荷和进程互斥。窗口测试覆盖最小尺寸与 150% / 200% 渲染。
+
+`test-real-package.ps1 -BundleDirectory <原版 app 目录>` 只操作复制到临时目录的副本，覆盖 Static / Supervised 两种策略、四项补丁、JavaScript 和远程桥语法，以及恢复后的全部文件哈希。不要把专有解包文件提交到仓库。
+
+本机没有 Windows Sandbox，用户选择先完成安全测试并提供隔离脚本。可在支持且已启用 Windows Sandbox 的电脑生成验收环境：
+
+```powershell
+.\scripts\new-test-sandbox.ps1 -OutputDirectory 'C:\WandAcceptance'
+```
+
+使用完整打包版；轻量版还需指定 `-WandInstallerPath <原版安装包>`。双击生成的 `Wand-Acceptance.wsb`，沙盒将自动执行首次安装、旧版卸载重装、配置与注册表备份清理、CLI 恢复重打和启动检查。载荷映射只读、网络关闭，只有新建的 results 目录可回写宿主。结果保存在 `results/result.json` 与 `acceptance.log`；沙盒关闭后内部安装消失。脚本拒绝在宿主用户或非指定沙盒路径运行。
+
+安装助手提供 `--install [--no-launch]` 供无人值守部署与隔离验收使用，**会执行真实卸载和重装**；请勿在宿主机上把它当成只读测试。`--check` 仍为只读校验。测试结果及尚未覆盖的项目见 [TEST-REPORT.md](TEST-REPORT.md)。

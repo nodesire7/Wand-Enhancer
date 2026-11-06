@@ -76,7 +76,8 @@ jobs:
           git restore --source "$fork_head" --staged --worktree -- Fork \
             .github/workflows/build.yml .github/workflows/sync-upstream.yml \
             scripts/build-distribution.ps1 scripts/test-fork.ps1 scripts/reapply-fork.ps1 \
-            scripts/write-release-notes.ps1
+            scripts/write-release-notes.ps1 scripts/test-installer.ps1 scripts/tests/installer.cs \
+            scripts/new-test-sandbox.ps1 scripts/sandbox-test.ps1 scripts/test-real-package.ps1
 
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
@@ -136,6 +137,7 @@ jobs:
         run: |
           ./scripts/build-distribution.ps1
           ./scripts/test-fork.ps1
+          ./scripts/test-installer.ps1
 
       - name: Publish rolling release
         shell: pwsh

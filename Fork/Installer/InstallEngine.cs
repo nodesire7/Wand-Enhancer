@@ -20,7 +20,7 @@ namespace WandEnhancer.Fork.Installer
         public string arguments { get; set; }
     }
 
-    internal sealed class InstallEngine : IDisposable
+    internal sealed class InstallEngine : IDisposable, IInstallSteps
     {
         internal static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 64 * 1024 * 1024 };
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -96,27 +96,46 @@ namespace WandEnhancer.Fork.Installer
             Directory.CreateDirectory(logDir);
             logFile = Path.Combine(logDir, DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N") + ".log");
             log = new StreamWriter(logFile) { AutoFlush = true };
-            Preflight();
-            Report(1, "关闭 Wand 并备份配置与注册表…");
+            InstallWorkflow.Run(this, launchAfter, package.version, Report);
+        }
+
+        void IInstallSteps.Validate() => Preflight();
+
+        void IInstallSteps.Backup()
+        {
             foreach (string brand in new[] { "Wand", "WeMod" }) StopUnder(Path.Combine(local, brand));
             BackupSettings();
-            Report(2, "卸载旧版并清理残留…");
+        }
+
+        void IInstallSteps.Remove()
+        {
             foreach (string brand in new[] { "Wand", "WeMod" }) RemoveOld(brand);
-            Report(3, "安装 Wand " + package.version + "，等待安装完成…");
+        }
+
+        void IInstallSteps.Install()
+        {
             Run(setup, package.arguments, 600000);
             WaitForInstall();
             string root = Path.Combine(local, "Wand");
             StopUnder(root);
-            Report(4, "通过 CLI 应用修改…");
+        }
+
+        void IInstallSteps.Patch()
+        {
+            string root = Path.Combine(local, "Wand");
             Cli("patch", "--path", root, "--expected-version", package.version,
                 "--patches", "pro,disable-updates", "--strategy", "static");
+        }
+
+        bool IInstallSteps.Verify()
+        {
+            string root = Path.Combine(local, "Wand");
             var state = Cli("status", "--path", root, "--expected-version", package.version);
             var data = state["data"] as Dictionary<string, object>;
-            if (data == null || !Convert.ToBoolean(data["patched"])) throw new InvalidOperationException("CLI 未确认修改成功；未启动 Wand。");
-            Report(5, launchAfter ? "修改完成，正在启动 Wand…" : "修改完成，已按选择跳过启动。");
-            if (launchAfter) Cli("launch", "--path", root, "--expected-version", package.version, "--strategy", "static");
-            Report(6, "安装完成，祝游玩愉快。");
+            return data != null && Convert.ToBoolean(data["patched"]);
         }
+
+        void IInstallSteps.Launch() => Cli("launch", "--path", Path.Combine(local, "Wand"), "--expected-version", package.version, "--strategy", "static");
 
         private void ValidateKnownPaths()
         {
@@ -191,7 +210,7 @@ namespace WandEnhancer.Fork.Installer
             Report(1, "配置备份：" + backup);
         }
 
-        private static object Snapshot(RegistryKey key)
+        internal static object Snapshot(RegistryKey key)
         {
             var values = key.GetValueNames().ToDictionary(name => name, name => (object)new {
                 kind = key.GetValueKind(name).ToString(), value = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames)
@@ -201,7 +220,7 @@ namespace WandEnhancer.Fork.Installer
             return new { path = key.Name, values, children };
         }
 
-        private Dictionary<string, object> StartupValues(RegistryKey run, string root)
+        internal static Dictionary<string, object> StartupValues(RegistryKey run, string root)
         {
             var values = new Dictionary<string, object>();
             if (run == null) return values;
@@ -214,7 +233,7 @@ namespace WandEnhancer.Fork.Installer
             return values;
         }
 
-        private static bool CommandIsUnder(string command, string root)
+        internal static bool CommandIsUnder(string command, string root)
         {
             if (string.IsNullOrWhiteSpace(command)) return false;
             command = Environment.ExpandEnvironmentVariables(command.Trim());
