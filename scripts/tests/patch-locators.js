@@ -17,6 +17,17 @@ export function accountReducer(state, action) {
     return { ...state, account: myAccount };
 }
 
+class HydratedStore {
+    constructor(state, options) {
+        this.state = state;
+        this.options = options;
+    }
+}
+
+export function hydrateStore(persisted) {
+    return new HydratedStore(persisted, { logDispatchedActions: false });
+}
+
 export function requestRemoteAuthCode() {
     return fetch('/api/remote/auth');
 }

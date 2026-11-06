@@ -4,6 +4,8 @@
 
 # WandEnhancer
 
+本 GBTGAME 分支提供支持 CLI 的 EXE 与一键安装助手，详见 [中文使用与构建说明](Fork/README.md)。
+
 [![GitLab Mirror](https://img.shields.io/badge/GitLab-mirror-fc6d26?logo=gitlab)](https://gitlab.com/kitbyte/wand-enhancer)
 
 </div>

@@ -1,0 +1,31 @@
+# Product
+
+<!-- impeccable:product-schema 1 -->
+
+## Platform
+
+Windows desktop (.NET Framework 4.8); the existing application uses WPF.
+
+## Users
+
+Chinese-speaking Wand users who want the supplied installation instructions performed by one Install button.
+
+## Product Purpose
+
+Detect and uninstall existing Wand/WeMod, clean its known per-user remnants, install the supplied Wand 12.68.0 without first launch, apply the enhancer through its CLI, then launch.
+
+## Capabilities and Constraints
+
+Preserve the fork's upstream synchronization and GBTGAME branding. Reuse the existing patch pipeline. Check payloads before changing an installation. Back up settings and affected registry entries. Automated tests use temporary fixtures and never the developer's installed Wand.
+
+Deliver one standalone WandSetup.exe with an embedded enhancer. Expose the enhancer's strategy, patch flags, auto-apply and custom scripts in the installer, using its existing visual styles. Keep the ready/status region compact.
+
+## Brand Commitments
+
+The user confirmed GBTGAME branding, simplified Chinese, a modern practical interface, author A-FEI-, and forum address bbs.gbtgame.me.
+
+Make saved configuration backups discoverable across restarts, allow recovery and deletion, and preserve a recovery point before replacing current settings. Sections fold instead of scrolling the status out of view.
+
+Use one selected accordion section at a time, identical header/body dimensions, and complete visible pages without scrolling. Page through scripts, backups and log history without dropping data.
+
+After installation, reopen the same executable as a launcher. Preserve its user-chosen filename and saved feature selections. Reapply and verify features on each launcher start without uninstalling or reinstalling a compatible existing Wand installation.

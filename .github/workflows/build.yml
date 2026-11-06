@@ -40,11 +40,18 @@ jobs:
             ./build.ps1 -Configuration Release
           }
 
+      - name: Build installer and test fork CLI
+        shell: pwsh
+        run: |
+          ./scripts/build-distribution.ps1
+          ./scripts/test-fork.ps1
+          ./scripts/test-installer.ps1
+
       - name: Upload unsigned executable
         uses: actions/upload-artifact@v6
         with:
           name: WandEnhancer-unsigned
-          path: WandEnhancer/bin/Release/WandEnhancer.exe
+          path: dist/Release/*
           if-no-files-found: error
 
       # The published artifact is always the offline build; this only proves the

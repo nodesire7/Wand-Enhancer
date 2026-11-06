@@ -70,6 +70,13 @@ namespace WandEnhancer.Core
                         },
                         new PatchEntry
                         {
+                            Name = "initialAccountState",
+                            SearchHints = new[] { "logDispatchedActions" },
+                            CapabilityHints = new[] { "logDispatchedActions" },
+                            Locate = LocateInitialAccountState
+                        },
+                        new PatchEntry
+                        {
                             // Native phone pairing signs out the patched desktop session.
                             Name = "disableNativeRemotePairing",
                             SearchHints = new[] { "requestRemoteAuthCode" },
@@ -164,6 +171,25 @@ namespace WandEnhancer.Core
             return Edits(reducer.ReplaceInBody(
                 @"account:\s*(?<account>[\w$]+)",
                 PatchPayload.Load("pro-account-reducer")));
+        }
+
+        private static JsEdit[] LocateInitialAccountState(JsCursor js)
+        {
+            int anchor = js.IndexOf("logDispatchedActions");
+            if (anchor < 0) return null;
+            int options = js.EnclosingOpener(anchor, '{');
+            int call = options < 0 ? -1 : js.EnclosingOpener(options, '(');
+            int comma = options < 0 ? -1 : js.SkipWhitespaceBack(options - 1);
+            if (call < 0 || comma < call || js.Text[comma] != ',')
+                throw new Exception("Initial store constructor arguments could not be located");
+            string prefix = js.Text.Substring(Math.Max(0, call - 128), Math.Min(call, 128));
+            if (!Regex.IsMatch(prefix, @"\bnew\s+[\w$]+(?:\.[\w$]+)*\s*$"))
+                throw new Exception("Initial store anchor is not a constructor");
+            for (int index = call + 1; index < comma; index++)
+                if (js.Text[index] == ',' && js.OpenerStack(index)[0] == call)
+                    throw new Exception("Initial store has unexpected arguments");
+            string state = js.Text.Substring(call + 1, comma - call - 1);
+            return Edits(new JsEdit(call + 1, comma, PatchPayload.Load("pro-initial-state", "state", state)));
         }
 
         private static JsEdit[] LocateUpdateHandler(JsCursor js)

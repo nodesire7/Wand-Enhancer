@@ -6,4 +6,5 @@
   <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\Branding\BrandingInfo.g.cs')">
     <Compile Include="$(MSBuildProjectDirectory)\Branding\*.cs" />
   </ItemGroup>
+  <Import Project="$(MSBuildThisFileDirectory)Fork\Fork.targets" Condition="Exists('$(MSBuildThisFileDirectory)Fork\Fork.targets')" />
 </Project>

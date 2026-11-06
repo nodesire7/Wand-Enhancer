@@ -1,0 +1,1100 @@
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Navigation;
+using System.Windows.Threading;
+using System.Threading;
+using System.Text;
+using System.Windows.Documents;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using Microsoft.Win32;
+using WandEnhancer.Fork.Installer;
+using WandEnhancer.Models;
+
+internal static class InstallerTests
+{
+    private static int passed;
+    private static string output;
+    private static string corePath;
+    private static readonly string[] Order = { "validate", "backup", "remove", "install", "patch", "verify", "state", "launch" };
+
+    [STAThread]
+    private static int Main(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            output = AppDomain.CurrentDomain.BaseDirectory;
+            var preview = new Application();
+            preview.Run(new InstallerWindow(new FakeInteraction(), new FakeBackups()));
+            return 0;
+        }
+        if (args.Length > 0 && args[0] == "--watch-updates")
+        {
+            File.WriteAllText(Path.Combine(args[1], "watcher.pid"), System.Diagnostics.Process.GetCurrentProcess().Id.ToString());
+            System.Threading.Thread.Sleep(30000); return 0;
+        }
+        if (args.Length > 0 && args[0] == "--watch-parent")
+        {
+            var core = System.Reflection.Assembly.LoadFrom(args[1]);
+            core.GetType("WandEnhancer.Core.Services.WatcherAutostart", true).GetMethod("StartDetached", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).Invoke(null, new object[] { args[2], args[3] });
+            Console.WriteLine("started"); return 0;
+        }
+        if (args.Length > 0 && args[0] == "--uninstall")
+        {
+            File.WriteAllText(Environment.GetEnvironmentVariable("WAND_REMOVAL_TEST_MARKER"), "confirmation-required");
+            return 0;
+        }
+        if (args.Length > 0 && args[0] == "--echo")
+        {
+            Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), new System.Text.UTF8Encoding(false)) { AutoFlush = true });
+            Console.WriteLine(InstallEngine.Json.Serialize(args.Skip(1).ToArray())); return 0;
+        }
+        output = args[0];
+        corePath = args[1];
+        Directory.CreateDirectory(output);
+        try
+        {
+            Test("install performs validation, backup, removal, installation, patch, verification, launch in order", () => {
+                var fake = new FakeSteps();
+                var reports = new List<int>();
+                InstallWorkflow.Run(fake, true, "12.68.0", (step, text) => reports.Add(step));
+                Equal(string.Join(",", fake.Calls), string.Join(",", Order));
+                Equal(reports.Last(), 6);
+            });
+            foreach (string operation in Order)
+            {
+                string failure = operation;
+                Test("failure in " + failure + " stops all subsequent actions", () => {
+                    var fake = new FakeSteps { FailAt = failure };
+                    bool complete = false;
+                    Throws(() => InstallWorkflow.Run(fake, true, "12.68.0", (step, text) => complete |= step == 6));
+                    Equal(fake.Calls.Count, Array.IndexOf(Order, failure) + 1);
+                    Check(!complete, "Failure must never report completion");
+                });
+            }
+            Test("false verification prevents launch", () => {
+                var fake = new FakeSteps { Verified = false };
+                Throws(() => InstallWorkflow.Run(fake, true, "12.68.0", (step, text) => {}));
+                Check(!fake.Calls.Contains("launch"), "Unverified patch launched");
+            });
+            Test("launch opt-out still verifies the patch", () => {
+                var fake = new FakeSteps();
+                InstallWorkflow.Run(fake, false, "12.68.0", (step, text) => {});
+                Equal(string.Join(",", fake.Calls), string.Join(",", Order.Take(7)));
+            });
+            Test("busy state rejects double activation and retry resets failed steps", () => {
+                var model = new InstallerViewModel("12.68.0");
+                Check(model.Begin(), "Did not start"); Check(!model.Begin(), "Double start accepted");
+                model.Report(3, "installing"); model.Fail("disk full");
+                Equal(model.Stages[3].State, "失败"); Equal(model.ActionText, "重试安装");
+                model.Report(6, "stale success"); Equal(model.State, "Error"); Equal(model.Message, "disk full");
+                Check(model.Begin(), "Retry rejected"); Equal(model.Progress, 0); Equal(model.Stages[3].State, "等待");
+            });
+            Test("success preserves launch opt-out and ignores stale updates", () => {
+                var model = new InstallerViewModel("12.68.0"); model.Begin(); model.Succeed(false);
+                Equal(model.Stages[5].State, "已跳过"); Equal(model.ActionText, "完成"); Check(!model.Begin(), "Success restarted installation");
+                model.Report(0, "late callback"); model.Fail("late error"); Equal(model.State, "Success"); Equal(model.Progress, 6);
+            });
+            Test("progress inputs are bounded", () => {
+                var model = new InstallerViewModel("12.68.0"); model.Begin(); model.Report(-1, ""); Equal(model.Progress, 0);
+                model.Report(99, ""); Equal(model.Progress, 6);
+            });
+            Test("startup cleanup matches only commands inside the exact application directory", () => {
+                Check(InstallEngine.CommandIsUnder("\"C:\\My Apps\\Wand\\Wand.exe\" --minimized", @"C:\My Apps\Wand"), "Quoted path rejected");
+                Check(!InstallEngine.CommandIsUnder(@"C:\Apps\WandOther\Other.exe", @"C:\Apps\Wand"), "Sibling accepted");
+                Check(!InstallEngine.CommandIsUnder(@"C:\Apps\Wand\..\Other.exe", @"C:\Apps\Wand"), "Traversal accepted");
+                Check(!InstallEngine.CommandIsUnder("\"", @"C:\Apps\Wand"), "Broken quote accepted");
+                Check(!InstallEngine.CommandIsUnder("relative.exe", @"C:\Apps\Wand"), "Relative command accepted");
+                Environment.SetEnvironmentVariable("WAND_INSTALLER_TEST_ROOT", @"C:\My Apps\Wand");
+                try { Check(InstallEngine.CommandIsUnder("\"%WAND_INSTALLER_TEST_ROOT%\\Wand.exe\"", @"C:\My Apps\Wand"), "Expanded command rejected"); }
+                finally { Environment.SetEnvironmentVariable("WAND_INSTALLER_TEST_ROOT", null); }
+            });
+            Test("registry backup preserves kinds, binary values, strings and subkeys", TestRegistry);
+            Test("all enhancer options reach an isolated PatchConfig snapshot", () => {
+                var options = new PatchOptionsViewModel { Strategy = EPatchStrategy.Supervised, ActivatePro = false, DevTools = true, RemotePanel = true, AutoApply = true };
+                var snapshot = options.Snapshot();
+                Equal(snapshot.Strategy, EPatchStrategy.Supervised); Check(snapshot.AutoApplyAfterUpdate, "Auto-apply lost");
+                Check(snapshot.PatchTypes.SetEquals(new[] { EPatchType.DevToolsOnF12, EPatchType.RemoteWebPanelPreview }), "Patch choices lost");
+                options.ActivatePro = true; Check(!snapshot.PatchTypes.Contains(EPatchType.ActivatePro), "Snapshot changed with UI");
+                options.DisableUpdates = true; Check(!options.AutoApply, "Conflicting update options enabled");
+                options.AutoApply = true; Check(!options.DisableUpdates, "Auto-apply did not allow updates");
+            });
+            Test("script selections are deduplicated, enable remote access and survive old installation removal", TestScriptOptions);
+            Test("auto-apply watcher does not inherit the CLI output pipe", TestWatcherPipe);
+            Test("silent removal never launches the original interactive uninstaller", TestSilentRemoval);
+            Test("shortcut cleanup backs up only links targeting the removed installation", TestShortcuts);
+            Test("silent removal rejects unsafe targets before any stop or cleanup action", () => {
+                bool touched = false;
+                Throws(() => SilentRemoval.Remove(Path.GetTempPath(), Path.GetTempPath(), "Other", path => touched = true, () => touched = true, () => touched = true));
+                Check(!touched, "Unsafe removal had side effects");
+            });
+            Test("Windows command argument quoting survives a real subprocess round-trip", () => {
+                string[] values = { "", "plain", "中文 路径", "a\tb", "embedded\"quote", @"C:\folder with space\", "\\\\\"", "line\nbreak", "--flag=value" };
+                var start = new System.Diagnostics.ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location,
+                    WandEnhancer.Fork.Arguments.Join(new[] { "--echo" }.Concat(values))) { UseShellExecute = false, RedirectStandardOutput = true, StandardOutputEncoding = new System.Text.UTF8Encoding(false) };
+                using (var process = System.Diagnostics.Process.Start(start))
+                {
+                    var read = process.StandardOutput.ReadToEndAsync(); Check(process.WaitForExit(5000), "Echo timed out"); Check(read.Wait(5000), "Echo output not closed");
+                    string[] actual = InstallEngine.Json.Deserialize<string[]>(read.Result);
+                    Check(values.SequenceEqual(actual), "Quoted arguments were changed by Windows parsing");
+                }
+            });
+            Test("standalone GUI process survives its dispatcher startup", () => {
+                using (var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(typeof(InstallerWindow).Assembly.Location) { UseShellExecute = false }))
+                try
+                {
+                    Check(!process.WaitForExit(3000), "Standalone GUI exited during startup; code " + (process.HasExited ? process.ExitCode.ToString() : "unknown"));
+                    process.Refresh(); Check(process.MainWindowHandle != IntPtr.Zero, "Standalone GUI has no window");
+                }
+                finally { if (!process.HasExited) { process.Kill(); process.WaitForExit(5000); } }
+            });
+            Test("existing installation applies, verifies, saves and launches without reinstall", TestExistingWorkflow);
+            Test("installation records survive restarts, corruption and version changes", TestLauncherState);
+            Test("backup restore, automatic recovery, deletion boundaries and rollback", TestBackupStore);
+            Test("settings registry round-trip preserves value kinds and rejects other keys", TestSettingsRestore);
+            Test("WPF default, busy, failure, success, minimum size and DPI layouts", TestWindow);
+            Console.WriteLine("PASS: " + passed + " installer test groups");
+            File.WriteAllText(Path.Combine(output, "result.json"), InstallEngine.Json.Serialize(new { success = true, groups = passed }));
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine(error);
+            File.WriteAllText(Path.Combine(output, "result.json"), InstallEngine.Json.Serialize(new { success = false, groups = passed, error = error.ToString() }));
+            return 1;
+        }
+    }
+
+    private static void TestRegistry()
+    {
+        string keyPath = @"Software\GBTGAME\WandInstaller.Tests\" + Guid.NewGuid().ToString("N");
+        using (var root = Registry.CurrentUser.CreateSubKey(keyPath))
+        try
+        {
+            root.SetValue("text", "中文", RegistryValueKind.String);
+            root.SetValue("count", 42, RegistryValueKind.DWord);
+            root.SetValue("binary", new byte[] { 0, 127, 255 }, RegistryValueKind.Binary);
+            root.SetValue("expand", "%TEMP%\\fixture", RegistryValueKind.ExpandString);
+            root.SetValue("multi", new[] { "one", "two" }, RegistryValueKind.MultiString);
+            using (var child = root.CreateSubKey("Nested")) child.SetValue("saved", "yes");
+            string snapshot = InstallEngine.Json.Serialize(InstallEngine.Snapshot(root));
+            foreach (string expected in new[] { "中文", "DWord", "Binary", "ExpandString", "%TEMP%", "MultiString", "Nested", "saved" }) Check(snapshot.Contains(expected), "Missing snapshot value " + expected);
+            using (var run = root.CreateSubKey("Run"))
+            {
+                run.SetValue("own", "\"C:\\Apps\\Wand\\Wand.exe\" --start");
+                run.SetValue("other", "\"C:\\Apps\\WandOther\\Other.exe\"");
+                var values = InstallEngine.StartupValues(run, @"C:\Apps\Wand");
+                Equal(values.Count, 1); Check(values.ContainsKey("own"), "Own startup missing");
+            }
+            using (var command = root.CreateSubKey(@"Software\Classes\wemod\shell\open\command")) command.SetValue("", "\"C:\\Apps\\Wand\\Wand.exe\" \"%1\"");
+            using (var command = root.CreateSubKey(@"Software\Classes\wand\shell\open\command")) command.SetValue("", "\"C:\\Apps\\Other\\Other.exe\" \"%1\"");
+            var protocols = UserShellCleanup.AssociatedProtocolKeys(root, @"C:\Apps\Wand").ToArray();
+            Equal(protocols.Length, 1); Equal(protocols[0], @"Software\Classes\wemod");
+        }
+        finally { Registry.CurrentUser.DeleteSubKeyTree(keyPath, false); }
+    }
+
+    private static void TestWatcherPipe()
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), "wand-watch-pipe-test-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch);
+        string child = Path.Combine(scratch, "WandEnhancerWatcher.exe");
+        string pidFile = Path.Combine(scratch, "watcher.pid");
+        File.Copy(System.Reflection.Assembly.GetExecutingAssembly().Location, child);
+        File.Copy(typeof(InstallerWindow).Assembly.Location, Path.Combine(scratch, "WandSetup.exe"));
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location,
+                WandEnhancer.Fork.Arguments.Join(new[] { "--watch-parent", corePath, child, scratch })) { UseShellExecute = false, RedirectStandardOutput = true };
+            using (var parent = System.Diagnostics.Process.Start(start))
+            {
+                var read = parent.StandardOutput.ReadToEndAsync(); Check(parent.WaitForExit(5000), "Watcher starter did not exit");
+                Check(read.Wait(1500), "Long-running watcher kept CLI output open");
+                Equal(parent.ExitCode, 0);
+            }
+            for (int i = 0; i < 50 && !File.Exists(pidFile); i++) System.Threading.Thread.Sleep(100);
+            Check(File.Exists(pidFile), "Watcher did not start");
+        }
+        finally
+        {
+            if (File.Exists(pidFile)) using (var process = System.Diagnostics.Process.GetProcessById(int.Parse(File.ReadAllText(pidFile))))
+                if (!process.HasExited && string.Equals(process.MainModule.FileName, child, StringComparison.OrdinalIgnoreCase)) { process.Kill(); process.WaitForExit(5000); }
+            Directory.Delete(scratch, true);
+        }
+    }
+
+    private static void TestScriptOptions()
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), "wand-script-test-" + Guid.NewGuid().ToString("N"));
+        string old = Path.Combine(scratch, "old"); Directory.CreateDirectory(old);
+        string script = Path.Combine(old, "中文 script.js"); File.WriteAllText(script, "globalThis.fixture = true;");
+        try
+        {
+            var options = new PatchOptionsViewModel(); options.AddScript(script); options.AddScript(script);
+            Equal(options.Scripts.Count, 1); Check(options.RemotePanel, "Script did not enable remote access");
+            options.Strategy = EPatchStrategy.Supervised; options.AutoApply = true;
+            var cached = PatchScriptStore.Copy(options.Snapshot(), Path.Combine(scratch, "cache"));
+            File.Delete(script); Directory.Delete(old);
+            var saved = PatchScriptStore.Copy(cached, Path.Combine(scratch, "installed", "WandEnhancerScripts"));
+            Equal(saved.Strategy, EPatchStrategy.Supervised); Check(saved.AutoApplyAfterUpdate, "Persisted config lost auto-apply");
+            Equal(File.ReadAllText(saved.CustomScriptPaths.Single()), "globalThis.fixture = true;");
+            Equal(Path.GetFileName(saved.CustomScriptPaths.Single()), "中文 script.js");
+            Directory.Delete(Path.Combine(scratch, "cache"), true);
+            Check(File.Exists(saved.CustomScriptPaths.Single()), "Auto-apply script depends on temporary cache");
+            string configFile = Path.Combine(scratch, "selected.json");
+            File.WriteAllText(configFile, InstallEngine.Json.Serialize(saved));
+            var start = new System.Diagnostics.ProcessStartInfo(typeof(InstallerWindow).Assembly.Location,
+                WandEnhancer.Fork.Arguments.Join(new[] { "--cli", "patch", "--path", Path.Combine(scratch, "missing-install"), "--config", configFile })) {
+                    UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = new System.Text.UTF8Encoding(false)
+                };
+            using (var process = System.Diagnostics.Process.Start(start))
+            {
+                var read = process.StandardOutput.ReadToEndAsync(); Check(process.WaitForExit(15000), "Config round-trip timed out"); Check(read.Wait(5000), "Config output not closed");
+                Equal(process.ExitCode, 3);
+                var reply = InstallEngine.Json.Deserialize<Dictionary<string, object>>(read.Result);
+                Equal(Convert.ToInt32(reply["code"]), 3);
+            }
+            options.Scripts.Clear(); Check(!options.HasScripts, "Script empty state is stale");
+        }
+        finally { Directory.Delete(scratch, true); }
+    }
+
+    private static void TestSilentRemoval()
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), "wand-removal-test-" + Guid.NewGuid().ToString("N"));
+        string local = Path.Combine(scratch, "Local");
+        string roaming = Path.Combine(scratch, "Roaming");
+        string root = Path.Combine(local, "Wand");
+        string marker = Path.Combine(scratch, "confirmation.marker");
+        Directory.CreateDirectory(root); Directory.CreateDirectory(Path.Combine(roaming, "Wand"));
+        File.Copy(System.Reflection.Assembly.GetExecutingAssembly().Location, Path.Combine(root, "Update.exe"));
+        File.Copy(typeof(InstallerWindow).Assembly.Location, Path.Combine(root, "WandSetup.exe"));
+        File.WriteAllText(Path.Combine(roaming, "Wand", "old.txt"), "old settings");
+        string readOnly = Path.Combine(root, "readonly.txt"); File.WriteAllText(readOnly, "read-only application file"); File.SetAttributes(readOnly, FileAttributes.ReadOnly);
+        string sibling = Path.Combine(local, "WandOther"); Directory.CreateDirectory(sibling);
+        File.WriteAllText(Path.Combine(sibling, "keep.txt"), "unrelated");
+        Environment.SetEnvironmentVariable("WAND_REMOVAL_TEST_MARKER", marker);
+        try
+        {
+            bool stopped = false, registry = false, shortcuts = false;
+            SilentRemoval.Remove(local, roaming, "Wand", path => { Equal(path, root); stopped = true; }, () => shortcuts = true, () => registry = true);
+            Check(!File.Exists(marker), "Original uninstaller was launched and requested confirmation");
+            Check(stopped && registry && shortcuts, "Cleanup steps were skipped");
+            Check(!Directory.Exists(root) && !Directory.Exists(Path.Combine(roaming, "Wand")), "Old installation remains");
+            Check(File.Exists(Path.Combine(sibling, "keep.txt")), "Unrelated directory was removed");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WAND_REMOVAL_TEST_MARKER", null);
+            Check(Path.GetFullPath(scratch).StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase), "Invalid fixture cleanup path");
+            Directory.Delete(scratch, true);
+        }
+    }
+
+    private static void TestShortcuts()
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), "wand-shortcut-test-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(scratch, "Wand");
+        string programs = Path.Combine(scratch, "Programs");
+        string group = Path.Combine(programs, "Wand");
+        string desktop = Path.Combine(scratch, "Desktop");
+        string backup = Path.Combine(scratch, "Backup");
+        Directory.CreateDirectory(root); Directory.CreateDirectory(group); Directory.CreateDirectory(desktop);
+        object shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true));
+        Action<string, string> create = (path, target) => {
+            object link = shell.GetType().InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, new object[] { path });
+            try
+            {
+                link.GetType().InvokeMember("TargetPath", System.Reflection.BindingFlags.SetProperty, null, link, new object[] { target });
+                link.GetType().InvokeMember("Save", System.Reflection.BindingFlags.InvokeMethod, null, link, null);
+            }
+            finally { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link); }
+        };
+        try
+        {
+            create(Path.Combine(desktop, "My Wand.lnk"), Path.Combine(root, "Wand.exe"));
+            create(Path.Combine(group, "Wand.lnk"), Path.Combine(root, "Update.exe"));
+            create(Path.Combine(desktop, "Wand.lnk"), Path.Combine(scratch, "Other", "Other.exe"));
+            UserShellCleanup.RemoveShortcuts(root, backup, new Dictionary<string, string> { { "Desktop", desktop }, { "Programs", programs } });
+            Check(!File.Exists(Path.Combine(desktop, "My Wand.lnk")), "Owned desktop shortcut remains");
+            Check(!Directory.Exists(group), "Empty Wand start menu folder remains");
+            Check(File.Exists(Path.Combine(desktop, "Wand.lnk")), "Same-name unrelated shortcut was deleted");
+            Check(File.Exists(Path.Combine(backup, "Desktop", "My Wand.lnk")), "Desktop shortcut backup missing");
+            Check(File.Exists(Path.Combine(backup, "Programs", "Wand", "Wand.lnk")), "Start menu shortcut backup missing");
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
+            Check(Path.GetFullPath(scratch).StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase), "Invalid shortcut fixture cleanup path");
+            Directory.Delete(scratch, true);
+        }
+    }
+
+    private static void TestWindow()
+    {
+        var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+        try
+        {
+            var window = new InstallerWindow(new FakeInteraction());
+            window.Show();
+            try
+            {
+                var model = (InstallerViewModel)window.DataContext;
+                Equal(((TextBlock)window.FindName("AuthorText")).Text, "作者  A-FEI-");
+                Equal(((Run)window.FindName("ForumText")).Text, "bbs.gbtgame.me");
+                Equal(((Hyperlink)window.FindName("ForumLink")).NavigateUri.AbsoluteUri, "https://bbs.gbtgame.me/");
+                Check(((ScrollViewer)window.FindName("SettingsScroll")).VerticalScrollBarVisibility == ScrollBarVisibility.Disabled, "Settings should not scroll");
+                var originalPalette = new ResourceDictionary { Source = new Uri("/WandSetup;component/Style/ColorScheme.xaml", UriKind.Relative) };
+                Equal(((SolidColorBrush)window.FindResource("Background")).Color, ((SolidColorBrush)originalPalette["Background"]).Color);
+                Capture(window, "ready", 900, 860, 96);
+                Test("button hover preserves geometry and disabled/pressed styles", () => TestButtonStates(window));
+                model.Begin(); model.Report(3, "正在安装 Wand 12.68.0…"); window.UpdateLayout();
+                Check(!((Button)window.FindName("InstallButton")).IsEnabled, "Busy install button enabled");
+                Check(!((CheckBox)window.FindName("Launch")).IsEnabled, "Busy launch checkbox enabled");
+                window.Close(); Check(window.IsVisible, "Busy window closed");
+                Capture(window, "busy", 960, 860, 96);
+                model.Fail("测试错误：无法写入目标目录。请检查磁盘空间和文件权限，查看日志后重试。\n" + new string('路', 400));
+                Check(((Button)window.FindName("InstallButton")).IsEnabled, "Retry unavailable");
+                ((Expander)window.FindName("LogExpander")).IsExpanded = true;
+                Capture(window, "error-minimum", 900, 860, 96);
+                model.Begin(); model.Succeed(true);
+                ((Expander)window.FindName("LogExpander")).IsExpanded = false;
+                Capture(window, "success", 960, 860, 96);
+                Capture(window, "dpi-125", 900, 860, 120);
+                Capture(window, "dpi-150", 900, 860, 144);
+                Capture(window, "dpi-200", 960, 860, 192);
+            }
+            finally { window.Close(); }
+            Test("reopening after installation offers launch without reinstall", TestReopenedLauncher);
+            Test("all option controls bind, update choices exclude each other, keyboard focus is visible", TestOptionControls);
+            Test("script dialog cancel, multiple, duplicate, invalid, failure and remove buttons", TestScriptControls);
+            Test("install, busy guard, log, backup, forum, failure, retry and finish buttons", TestWorkflowControls);
+            Test("invalid options never create a session and logging errors never crash recovery", TestRecoveryControls);
+            Test("all script, log and backup pages remain complete without scrolling", TestLongContent);
+            Test("backup management buttons, confirmation, busy guard and failures", TestBackupControls);
+            Test("accordion replaces sections without pushing status, and reverses animation", TestAccordion);
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(null); app.Shutdown(); }
+    }
+
+
+    private static void ThrowsAny(Action action)
+    {
+        bool failed = false; try { action(); } catch { failed = true; } Check(failed, "Unsafe operation was accepted");
+    }
+
+    private static void TestExistingWorkflow()
+    {
+        string[] order = { "validate", "prepare", "patch", "verify", "state", "launch" };
+        var fake = new ExistingSteps();
+        ExistingInstallWorkflow.Run(fake, true, (step, message) => {});
+        Equal(string.Join(",", fake.Calls), string.Join(",", order));
+        foreach (string failure in order)
+        {
+            fake = new ExistingSteps { FailAt = failure };
+            bool complete = false;
+            ThrowsAny(() => ExistingInstallWorkflow.Run(fake, true, (step, message) => complete |= step == 6));
+            Equal(fake.Calls.Count, Array.IndexOf(order, failure) + 1); Check(!complete, "Failed existing launch reported success");
+        }
+        fake = new ExistingSteps { Verified = false };
+        ThrowsAny(() => ExistingInstallWorkflow.Run(fake, true, (step, message) => {}));
+        Check(!fake.Calls.Contains("state") && !fake.Calls.Contains("launch"), "Unverified changes recorded or launched");
+        fake = new ExistingSteps(); ExistingInstallWorkflow.Run(fake, false, (step, message) => {});
+        Equal(string.Join(",", fake.Calls), string.Join(",", order.Take(5)));
+    }
+    private sealed class ExistingSteps : IExistingInstallSteps
+    {
+        public List<string> Calls = new List<string>(); public string FailAt; public bool Verified = true;
+        private void Call(string value) { Calls.Add(value); if (FailAt == value) throw new IOException("fixture " + value); }
+        public void ValidateExisting() { Call("validate"); } public void PrepareExisting() { Call("prepare"); }
+        public void Patch() { Call("patch"); } public bool Verify() { Call("verify"); return Verified; }
+        public void SaveState() { Call("state"); } public void Launch() { Call("launch"); }
+    }
+    private static void TestLauncherState()
+    {
+        string fixture = Path.Combine(output, "launcher-state-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(fixture, "Wand"), state = Path.Combine(fixture, "Data", "installation.json");
+        var store = new LauncherStateStore(root, state, "12.68.0", file => "12.68.0.0");
+        try
+        {
+            Check(!store.Inspect().Exists, "Missing installation was treated as ready");
+            string app = Path.Combine(root, "app-12.68.0"), resources = Path.Combine(app, "resources");
+            Directory.CreateDirectory(Path.Combine(resources, "app.asar.unpacked"));
+            File.WriteAllText(Path.Combine(app, "Wand.exe"), "fixture"); File.WriteAllText(Path.Combine(resources, "app.asar"), "fixture");
+            Check(store.Inspect().Exists && store.Inspect().CanRun, "Existing legacy installation requires reinstall");
+            var config = new PatchOptionsViewModel { Strategy = EPatchStrategy.Supervised, DevTools = true, AutoApply = true }.Snapshot();
+            store.Save(config);
+            var reopened = new LauncherStateStore(root, state, "12.68.0", file => "12.68.0");
+            var snapshot = reopened.Inspect(); Check(snapshot.Config != null, "Saved selection could not be read: " + snapshot.Message + snapshot.Error); Check(snapshot.CanRun && snapshot.Config.AutoApplyAfterUpdate, "Persisted selection missing");
+            Equal(snapshot.Config.Strategy, EPatchStrategy.Supervised); Check(snapshot.Config.PatchTypes.Contains(EPatchType.DevToolsOnF12), "Saved devtools lost");
+            string script = Path.Combine(fixture, "保留脚本.js"); File.WriteAllText(script, "void 0;");
+            config.PatchTypes.Add(EPatchType.RemoteWebPanelPreview); config.CustomScriptPaths.Add(script);
+            reopened.Save(config); File.Delete(script);
+            var missingScript = reopened.Inspect();
+            Check(missingScript.Exists && missingScript.CanRun && missingScript.Config.CustomScriptPaths.Single() == script, "Missing script must not discard installation or saved choices");
+            var loaded = new PatchOptionsViewModel(); loaded.Load(missingScript.Config); ThrowsAny(() => loaded.Snapshot());
+            File.WriteAllText(script, "void 0;");
+            reopened.Save(config); Check(!Directory.GetFiles(Path.GetDirectoryName(state), "*.tmp").Any(), "Atomic-write temporary file remains");
+            File.WriteAllText(state, "broken json");
+            Check(reopened.Inspect().Exists && reopened.Inspect().CanRun, "Corrupt record should not reinstall an existing app");
+            File.Delete(state);
+            File.WriteAllText(Path.Combine(root, "enhancer.json"), InstallEngine.Json.Serialize(config));
+            Equal(reopened.Inspect().Config.Strategy, EPatchStrategy.Supervised);
+            string newer = Path.Combine(root, "app-13.0.0"); Directory.CreateDirectory(Path.Combine(newer, "resources", "app.asar.unpacked"));
+            File.WriteAllText(Path.Combine(newer, "Wand.exe"), "fixture"); File.WriteAllText(Path.Combine(newer, "resources", "app.asar"), "fixture");
+            Check(reopened.Inspect().Exists && !reopened.Inspect().CanRun, "New version must block without downgrade/reinstall");
+            Directory.Delete(newer, true);
+            Check(!new LauncherStateStore(root, state, "12.68.0", file => "13.0.0").Inspect().CanRun, "Executable version replacement bypassed detection");
+            File.Delete(Path.Combine(app, "Wand.exe"));
+            Check(reopened.Inspect().Exists && !reopened.Inspect().CanRun, "Partial install must not trigger replacement");
+            Directory.Delete(app, true); Check(!reopened.Inspect().Exists, "Stale record was trusted after files were removed");
+        }
+        finally { if (Directory.Exists(fixture)) { BackupStore.Guard(fixture); Directory.Delete(fixture, true); } }
+    }
+
+    private static void TestBackupStore()
+    {
+        string fixture = Path.Combine(output, "backup-store-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(fixture, "backups"), roaming = Path.Combine(fixture, "Roaming"), local = Path.Combine(fixture, "Local");
+        string backup = Path.Combine(root, "20261106-120000-" + Guid.NewGuid().ToString("N"));
+        string saved = Path.Combine(backup, "Roaming", "Wand"), current = Path.Combine(roaming, "Wand");
+        Directory.CreateDirectory(saved); Directory.CreateDirectory(current); Directory.CreateDirectory(local);
+        File.WriteAllText(Path.Combine(saved, "config.json"), "old"); File.WriteAllText(Path.Combine(current, "config.json"), "current");
+        File.WriteAllText(Path.Combine(current, "new-only.txt"), "remove when restoring");
+        File.WriteAllText(Path.Combine(backup, "说明.txt"), "legacy backup");
+        File.WriteAllText(Path.Combine(backup, "Wand-Registry32-settings.json"), "old registry");
+        File.WriteAllText(Path.Combine(backup, "Wand-Registry32-uninstall.json"), "must not restore uninstall data");
+        int stopped = 0; var registry = new FakeRegistry();
+        var store = new BackupStore(root, roaming, local, registry, path => stopped++);
+        try
+        {
+            Equal(store.List().Count, 1); Check(store.List()[0].CanRestore, "Legacy backup not recognized");
+            string recovery = store.Restore(backup);
+            Equal(stopped, 1); Equal(File.ReadAllText(Path.Combine(current, "config.json")), "old");
+            Check(!File.Exists(Path.Combine(current, "new-only.txt")), "Restore merged stale files");
+            Equal(File.ReadAllText(Path.Combine(recovery, "Roaming", "Wand", "config.json")), "current");
+            Equal(registry.Values[RegistryView.Registry32], "old registry");
+            Check(!registry.Restored.Any(value => value.Contains("uninstall")), "Old registration was restored");
+            store.Restore(recovery); Equal(File.ReadAllText(Path.Combine(current, "config.json")), "current");
+            Equal(registry.Values[RegistryView.Registry32], "current registry");
+            registry.FailOnce = true;
+            ThrowsAny(() => store.Restore(backup));
+            Equal(File.ReadAllText(Path.Combine(current, "config.json")), "current");
+            Equal(registry.Values[RegistryView.Registry32], "current registry");
+            registry.Values[RegistryView.Registry32] = "bad";
+            ThrowsAny(() => store.Restore(backup));
+            Equal(File.ReadAllText(Path.Combine(current, "config.json")), "current");
+            registry.Values[RegistryView.Registry32] = "current registry";
+            int previous = stopped;
+            File.WriteAllText(Path.Combine(backup, "Wand-Registry32-settings.json"), "bad");
+            ThrowsAny(() => store.Restore(backup)); Equal(stopped, previous);
+            ThrowsAny(() => store.Delete(root));
+            ThrowsAny(() => store.Delete(Path.Combine(fixture, Path.GetFileName(backup))));
+            File.SetAttributes(Path.Combine(saved, "config.json"), FileAttributes.ReadOnly);
+            store.Delete(backup); Check(!Directory.Exists(backup), "Selected backup remains");
+            Check(Directory.Exists(recovery), "Another backup was deleted");
+            Check(File.Exists(Path.Combine(current, "config.json")), "Deleting a backup changed current configuration");
+        }
+        finally { BackupStore.Guard(fixture); Directory.Delete(fixture, true); }
+    }
+    private sealed class FakeRegistry : ISettingsRegistry
+    {
+        public Dictionary<RegistryView, string> Values = new Dictionary<RegistryView, string> { { RegistryView.Registry32, "current registry" }, { RegistryView.Registry64, "current registry64" } };
+        public bool FailOnce;
+        public List<string> Restored = new List<string>();
+        public string Capture(string brand, RegistryView view) { return Values[view]; }
+        public void Validate(string json, string brand) { if (json == "bad") throw new IOException("bad snapshot"); }
+        public void Restore(string json, string brand, RegistryView view)
+        {
+            if (FailOnce) { FailOnce = false; throw new IOException("fixture write failure"); }
+            Restored.Add(json); Values[view] = json;
+        }
+    }
+    private static void TestSettingsRestore()
+    {
+        string parent = @"Software\GBTGAME\Backup.Tests\" + Guid.NewGuid().ToString("N");
+        var registry = new SettingsRegistry(parent);
+        try
+        {
+            using (var key = Registry.CurrentUser.CreateSubKey(parent + @"\Wand"))
+            {
+                key.SetValue("", "default"); key.SetValue("text", "中文"); key.SetValue("dword", -1, RegistryValueKind.DWord);
+                key.SetValue("qword", 1234567890123L, RegistryValueKind.QWord); key.SetValue("binary", new byte[] { 0, 127, 255 }, RegistryValueKind.Binary);
+                key.SetValue("expand", "%TEMP%\\fixture", RegistryValueKind.ExpandString); key.SetValue("multi", new[] { "one", "二" }, RegistryValueKind.MultiString);
+                using (var child = key.CreateSubKey("Nested")) child.SetValue("saved", "yes");
+            }
+            string saved = registry.Capture("Wand", RegistryView.Registry64);
+            registry.Validate(saved, "Wand");
+            registry.Restore("null", "Wand", RegistryView.Registry64);
+            registry.Restore(saved, "Wand", RegistryView.Registry64);
+            using (var key = Registry.CurrentUser.OpenSubKey(parent + @"\Wand"))
+            {
+                Equal((string)key.GetValue(""), "default"); Equal((int)key.GetValue("dword"), -1); Equal((long)key.GetValue("qword"), 1234567890123L);
+                Check(((byte[])key.GetValue("binary")).SequenceEqual(new byte[] { 0, 127, 255 }), "Binary lost");
+                Check(((string[])key.GetValue("multi")).SequenceEqual(new[] { "one", "二" }), "MultiString lost");
+                Equal(key.GetValueKind("expand"), RegistryValueKind.ExpandString);
+                Equal((string)key.GetValue("expand", null, RegistryValueOptions.DoNotExpandEnvironmentNames), "%TEMP%\\fixture");
+                using (var child = key.OpenSubKey("Nested")) Equal((string)child.GetValue("saved"), "yes");
+            }
+            ThrowsAny(() => registry.Restore(saved.Replace("HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE"), "Wand", RegistryView.Registry64));
+            ThrowsAny(() => registry.Restore(saved, "Other", RegistryView.Registry64));
+            Equal(registry.Capture("Wand", RegistryView.Registry64), saved);
+        }
+        finally { Registry.CurrentUser.DeleteSubKeyTree(parent, false); }
+    }
+    private static void CheckDarkList(ListBox list)
+    {
+        list.UpdateLayout();
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(list.ActualWidth), (int)Math.Ceiling(list.ActualHeight), 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(list);
+        var pixel = new byte[4];
+        bitmap.CopyPixels(new Int32Rect(8, Math.Min((int)list.ActualHeight - 5, 85), 1, 1), pixel, 4, 0);
+        Check(pixel[3] > 0 && pixel[0] < 90 && pixel[1] < 90 && pixel[2] < 90, "Disabled backup list renders a light system background");
+    }
+    private static void SettleSections(InstallerWindow window)
+    {
+        PumpUntil(() => {
+            var host = Control<Grid>(window, "ContentSections");
+            if (host.ActualHeight <= 0) return true;
+            foreach (var section in new[] { "OptionsExpander", "LogExpander", "BackupsExpander" })
+            {
+                var control = Control<Expander>(window, section);
+                double height = control.IsExpanded ? Math.Max(40, host.ActualHeight - 80) : 40;
+                if (Math.Abs(control.ActualHeight - height) > 1) return false;
+                var body = control.Template.FindName("Body", control) as FrameworkElement;
+                if (body != null && (!control.IsExpanded && body.Visibility != Visibility.Collapsed || control.IsExpanded && Math.Abs(body.Opacity - 1) > 0.001)) return false;
+            }
+            return true;
+        });
+        window.UpdateLayout();
+    }
+    private static void TestAccordion()
+    {
+        var window = new InstallerWindow(new FakeInteraction(), new FakeBackups()); window.Show();
+        try
+        {
+            Capture(window, "accordion-options", 900, 860, 96);
+            var status = Control<Border>(window, "StatusPanel");
+            var original = status.TranslatePoint(new Point(), window);
+            Control<Expander>(window, "LogExpander").IsExpanded = true;
+            Capture(window, "accordion-log", 900, 860, 96);
+            Check(!Control<Expander>(window, "OptionsExpander").IsExpanded, "Options did not fold");
+            Equal(status.TranslatePoint(new Point(), window), original);
+            Control<Expander>(window, "BackupsExpander").IsExpanded = true;
+            Capture(window, "accordion-backups", 900, 860, 96);
+            Check(!Control<Expander>(window, "LogExpander").IsExpanded, "Log did not fold");
+            double expandedHeight = Control<Expander>(window, "BackupsExpander").ActualHeight;
+            foreach (string name in new[] { "OptionsExpander", "LogExpander", "BackupsExpander", "OptionsExpander", "LogExpander", "BackupsExpander" })
+            {
+                var chosen = Control<Expander>(window, name); chosen.ApplyTemplate();
+                Click((ToggleButton)chosen.Template.FindName("HeaderToggle", chosen));
+                SettleSections(window);
+                Equal(new[] { "OptionsExpander", "LogExpander", "BackupsExpander" }.Count(item => Control<Expander>(window, item).IsExpanded), 1);
+                Check(chosen.IsExpanded, "Clicked header did not select its section");
+                Equal(chosen.ActualHeight, expandedHeight);
+                Click((ToggleButton)chosen.Template.FindName("HeaderToggle", chosen)); SettleSections(window);
+                Check(chosen.IsExpanded, "Clicked active header left all sections closed");
+            }
+            var controller = (AccordionMotion)typeof(InstallerWindow).GetField("accordion", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(window);
+            for (int i = 0; i < 12; i++)
+            {
+                Control<Expander>(window, i % 2 == 0 ? "OptionsExpander" : "LogExpander").IsExpanded = true;
+                controller.Layout(true);
+                Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.Render, new Action(() => {}));
+            }
+            SettleSections(window);
+            Equal(status.TranslatePoint(new Point(), window), original);
+            Check(Control<Expander>(window, "LogExpander").IsExpanded, "Rapid toggles ended in wrong section");
+            controller.Layout(false); SettleSections(window);
+            Control<Expander>(window, "BackupsExpander").IsExpanded = true;
+            controller.Layout(false); SettleSections(window);
+            var list = Control<ListBox>(window, "BackupList");
+            list.SetCurrentValue(UIElement.IsEnabledProperty, false);
+            CheckDarkList(list);
+            list.ClearValue(UIElement.IsEnabledProperty);
+            Control<Expander>(window, "LogExpander").IsExpanded = true;
+            controller.Layout(true); SettleSections(window);
+        }
+        finally { window.Close(); }
+    }
+    private static void TestBackupControls()
+    {
+        var ui = new FakeInteraction(); var backups = new FakeBackups();
+        var window = new InstallerWindow(ui, backups); window.Show();
+        try
+        {
+            PumpUntil(() => Control<ListBox>(window, "BackupList").Items.Count == 1);
+            Control<Expander>(window, "BackupsExpander").IsExpanded = true;
+            Equal(Control<TextBox>(window, "BackupRootText").Text, backups.Root);
+            Click(Control<Button>(window, "OpenBackupRoot")); Equal(ui.Opened.Last(), backups.Root);
+            Click(Control<Button>(window, "OpenBackupFolder")); Equal(ui.Opened.Last(), backups.Entries[0].Path);
+            SettleSections(window); window.UpdateLayout(); double listHeight = Control<ListBox>(window, "BackupList").ActualHeight;
+            Click(Control<Button>(window, "DeleteBackup")); Equal(backups.Deleted, 0);
+            Equal(Control<Border>(window, "BackupConfirmation").Visibility, Visibility.Visible);
+            Check(Control<TextBlock>(window, "BackupConfirmationText").Text.Contains(backups.Item.Path), "Confirmation must show the full selected backup path");
+            window.UpdateLayout(); Equal(Control<ListBox>(window, "BackupList").ActualHeight, listHeight);
+            CheckDarkList(Control<ListBox>(window, "BackupList"));
+            Capture(window, "backups-confirm", 900, 860, 96);
+            Click(Control<Button>(window, "CancelBackup")); Equal(backups.Deleted, 0);
+            Click(Control<Button>(window, "RestoreBackup")); Equal(backups.Restored, 0);
+            backups.Hold = true; Click(Control<Button>(window, "ConfirmBackup"));
+            PumpUntil(() => backups.Restored == 1);
+            Check(!Control<Button>(window, "InstallButton").IsEnabled && !Control<Button>(window, "DeleteBackup").IsEnabled, "Backup operation did not block installation");
+            window.Close(); Check(window.IsVisible, "Window closed during restore");
+            Click(Control<Button>(window, "ConfirmBackup")); Equal(backups.Restored, 1);
+            backups.Gate.Set(); PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled);
+            Check(Control<TextBlock>(window, "BackupFeedback").Text.Contains("配置已恢复"), "Restore feedback missing");
+            backups.Hold = false;
+            Click(Control<Button>(window, "DeleteBackup")); Click(Control<Button>(window, "ConfirmBackup"));
+            PumpUntil(() => backups.Deleted == 1 && Control<Button>(window, "InstallButton").IsEnabled);
+            Equal(Control<ListBox>(window, "BackupList").Items.Count, 0);
+            Equal(Control<TextBlock>(window, "EmptyBackups").Visibility, Visibility.Visible);
+            Check(!Control<Button>(window, "RestoreBackup").IsEnabled, "Restore enabled with no selection");
+            backups.Entries.Add(backups.Item); Click(Control<Button>(window, "RefreshBackups"));
+            backups.Fail = true;
+            Click(Control<Button>(window, "RestoreBackup")); Click(Control<Button>(window, "ConfirmBackup"));
+            PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled);
+            Check(Control<TextBlock>(window, "BackupFeedback").Text.Contains("操作未完成"), "Restore error hidden");
+            Capture(window, "backups-error", 900, 860, 96);
+        }
+        finally { backups.Gate.Set(); Click(Control<Button>(window, "CancelBackup")); PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled); window.Close(); }
+    }
+    private sealed class FakeBackups : IBackupStore
+    {
+        public string Root { get; private set; }
+        public List<BackupEntry> Entries = new List<BackupEntry>();
+        public BackupEntry Item;
+        public volatile int Restored, Deleted;
+        public string LastPath;
+        public bool Hold, Fail;
+        public ManualResetEventSlim Gate = new ManualResetEventSlim(false);
+        public FakeBackups()
+        {
+            Root = Path.Combine(output, "fake-backup-manager");
+            Item = new BackupEntry { Path = Path.Combine(Root, "20261106-120000-fixture"), Label = "2026-11-06 12:00:00 · 安装前备份", Summary = "Wand 用户配置", CanRestore = true };
+            Entries.Add(Item);
+        }
+        public IList<BackupEntry> List() { return Entries.ToList(); }
+        public string Restore(string path)
+        {
+            LastPath = path; Restored++; if (Hold && !Gate.Wait(10000)) throw new TimeoutException(); if (Fail) throw new IOException("fixture restore failed"); return path;
+        }
+        public void Delete(string path) { LastPath = path; Deleted++; Entries.RemoveAll(entry => entry.Path == path); }
+    }
+
+    private static T Control<T>(InstallerWindow window, string name) where T : class { return (T)window.FindName(name); }
+    private static void Click(ButtonBase button)
+    {
+        typeof(ButtonBase).GetMethod("OnClick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(button, null);
+    }
+    private static void Toggle(InstallerWindow window, string name, bool value)
+    {
+        var box = Control<CheckBox>(window, name);
+        if (box.IsChecked != value) Click(box);
+        Equal(box.IsChecked, (bool?)value);
+    }
+    private static void PumpUntil(Func<bool> done)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        do
+        {
+            Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.ApplicationIdle, new Action(() => {}));
+            if (done()) { Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.ApplicationIdle, new Action(() => {})); return; }
+            Thread.Sleep(10);
+        } while (DateTime.UtcNow < deadline);
+        throw new Exception("UI operation timed out");
+    }
+    private static void TestButtonStates(InstallerWindow window)
+    {
+        var button = Control<Button>(window, "InstallButton");
+        window.UpdateLayout();
+        var before = button.TransformToAncestor(window).TransformBounds(new Rect(button.RenderSize));
+        var hoverKey = (DependencyPropertyKey)typeof(UIElement).GetField("IsMouseOverPropertyKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).GetValue(null);
+        var pressedKey = (DependencyPropertyKey)typeof(ButtonBase).GetField("IsPressedPropertyKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).GetValue(null);
+        try
+        {
+            button.SetValue(hoverKey, true); window.UpdateLayout();
+            Equal(button.TransformToAncestor(window).TransformBounds(new Rect(button.RenderSize)), before);
+            button.SetValue(pressedKey, true); Equal(button.Opacity, 0.75);
+            button.ClearValue(pressedKey); button.IsEnabled = false;
+            Equal(((SolidColorBrush)button.Background).Color, ((SolidColorBrush)window.FindResource("Muted")).Color);
+        }
+        finally { button.ClearValue(hoverKey); button.ClearValue(pressedKey); button.ClearValue(UIElement.IsEnabledProperty); }
+    }
+    private static void TestOptionControls()
+    {
+        var window = new InstallerWindow(new FakeInteraction()); window.Show();
+        try
+        {
+            PumpUntil(() => window.IsLoaded);
+            var model = (InstallerViewModel)window.DataContext;
+            var strategy = Control<ComboBox>(window, "StrategyBox");
+            Check(strategy.IsKeyboardFocusWithin, "Initial keyboard focus missing");
+            Check(strategy.FocusVisualStyle != null, "Strategy keyboard focus invisible");
+            Check(!Control<Button>(window, "PreviousLog").IsEnabled && !Control<Button>(window, "NextLog").IsEnabled, "Empty log pager should be disabled");
+            Toggle(window, "ActivateProBox", false); Equal(model.Options.ActivatePro, false);
+            Toggle(window, "ActivateProBox", true); Equal(model.Options.ActivatePro, true);
+            Toggle(window, "DevToolsBox", true); Equal(model.Options.DevTools, true);
+            Toggle(window, "DevToolsBox", false); Equal(model.Options.DevTools, false);
+            Toggle(window, "AutoApplyBox", true); Equal(model.Options.AutoApply, true);
+            Equal(Control<CheckBox>(window, "DisableUpdatesBox").IsChecked, (bool?)false);
+            Toggle(window, "DisableUpdatesBox", true); Equal(model.Options.DisableUpdates, true);
+            Equal(Control<CheckBox>(window, "AutoApplyBox").IsChecked, (bool?)false);
+            Toggle(window, "RemotePanelBox", true); Equal(model.Options.RemotePanel, true);
+            Toggle(window, "RemotePanelBox", false); Equal(model.Options.RemotePanel, false);
+            strategy.SetCurrentValue(Selector.SelectedValueProperty, EPatchStrategy.Supervised);
+            Equal(model.Options.Strategy, EPatchStrategy.Supervised);
+            strategy.SetCurrentValue(Selector.SelectedValueProperty, EPatchStrategy.Static);
+            Equal(model.Options.Strategy, EPatchStrategy.Static);
+            foreach (string name in new[] { "ActivateProBox", "DevToolsBox", "DisableUpdatesBox", "RemotePanelBox", "AutoApplyBox", "Launch" })
+                Check(Control<CheckBox>(window, name).FocusVisualStyle != null, "Missing keyboard outline: " + name);
+            Click(Control<CheckBox>(window, "Launch")); Equal(Control<CheckBox>(window, "Launch").IsChecked, (bool?)false);
+            strategy.Focus(); Check(strategy.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next)), "Tab navigation stuck");
+            Check(Control<CheckBox>(window, "ActivateProBox").IsKeyboardFocused, "Wrong next Tab target");
+            var expander = Control<Expander>(window, "LogExpander"); expander.ApplyTemplate();
+            Click(Descendants(expander).OfType<ToggleButton>().First()); Check(expander.IsExpanded, "Expand log failed");
+            Click(Descendants(expander).OfType<ToggleButton>().First()); Check(expander.IsExpanded, "Active section must remain open");
+        }
+        finally { window.Close(); }
+    }
+    private static void TestScriptControls()
+    {
+        var ui = new FakeInteraction(); var window = new InstallerWindow(ui); window.Show();
+        string script = Path.Combine(output, "按钮测试 中文.js"); File.WriteAllText(script, "globalThis.uiTest = true;");
+        string second = Path.Combine(output, "第二个脚本.js"); File.WriteAllText(second, "void 0;");
+        try
+        {
+            var model = (InstallerViewModel)window.DataContext;
+            var add = Control<Button>(window, "AddScriptButton");
+            Click(add); Equal(model.Options.Scripts.Count, 0);
+            ui.Files = new[] { script, second, script }; Click(add); window.UpdateLayout();
+            Equal(model.Options.Scripts.Count, 2); Check(model.Options.RemotePanel, "Script did not enable remote panel");
+            Equal(Control<TextBlock>(window, "NoScriptsText").Visibility, Visibility.Collapsed);
+            ui.Files = new[] { Path.Combine(output, "missing.txt") }; Click(add);
+            Equal(model.Options.Scripts.Count, 2); Check(Control<Expander>(window, "LogExpander").IsExpanded, "Invalid selection hidden");
+            Control<Expander>(window, "OptionsExpander").IsExpanded = true; SettleSections(window);
+            ui.SelectionError = true; Click(add);
+            Check(AllLogs(window).Contains("dialog unavailable"), "File dialog failure was not shown");
+            Control<Expander>(window, "OptionsExpander").IsExpanded = true; SettleSections(window);
+            var remove = Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().First();
+            Equal(System.Windows.Automation.AutomationProperties.GetName(remove), "移除脚本 " + Path.GetFileName(script));
+            Click(remove); window.UpdateLayout(); Equal(model.Options.Scripts.Count, 1);
+            Click(Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().Single()); window.UpdateLayout();
+            Equal(model.Options.Scripts.Count, 0);
+            Equal(Control<TextBlock>(window, "NoScriptsText").Visibility, Visibility.Visible);
+            Check(File.Exists(script), "Remove button deleted the original file");
+        }
+        finally { window.Close(); }
+    }
+    private static void TestWorkflowControls()
+    {
+        var ui = new FakeInteraction { Hold = true, Fail = true }; var window = new InstallerWindow(ui); window.Show();
+        var model = (InstallerViewModel)window.DataContext;
+        try
+        {
+            Toggle(window, "Launch", false);
+            ui.Files = new[] { Path.Combine(output, "busy-script.js") }; File.WriteAllText(ui.Files[0], "void 0;");
+            Click(Control<Button>(window, "AddScriptButton")); window.UpdateLayout();
+            var remove = Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().Single();
+            Click(Control<Button>(window, "InstallButton"));
+            PumpUntil(() => ui.Session != null && ui.Session.Started);
+            Check(model.IsBusy, "Install did not enter busy state");
+            foreach (string name in new[] { "InstallButton", "Launch", "OptionsEditor", "AddScriptButton" })
+                Check(!Control<UIElement>(window, name).IsEnabled, "Busy control enabled: " + name);
+            Click(Control<Button>(window, "InstallButton")); Equal(ui.Created, 1);
+            Click(Control<Button>(window, "AddScriptButton")); Equal(ui.Selected, 1);
+            Click(remove); Equal(model.Options.Scripts.Count, 1);
+            Equal(ui.Config.CustomScriptPaths.Single(), ui.Files.Single());
+            window.Close(); Check(window.IsVisible, "Close interrupted an active installation");
+            Capture(window, "buttons-busy", 900, 860, 96);
+            ui.Session.Gate.Set(); PumpUntil(() => model.State == "Error" && ui.Session.Disposed);
+            Check(ui.Session.FailureRecorded, "Failure not recorded");
+            Equal(Control<Button>(window, "InstallButton").Content, "重试安装");
+            Check(Control<Expander>(window, "LogExpander").IsExpanded, "Failure logs not expanded");
+            foreach (string name in new[] { "OpenLog", "OpenBackup" })
+            {
+                Equal(Control<Button>(window, name).Visibility, Visibility.Visible);
+                Click(Control<Button>(window, name));
+            }
+            Equal(ui.Opened[0], ui.Session.LogPath); Check(Control<Expander>(window, "BackupsExpander").IsExpanded, "Backup manager did not open");
+            var forum = Control<Hyperlink>(window, "ForumLink");
+            var navigate = new RequestNavigateEventArgs(forum.NavigateUri, "") { RoutedEvent = Hyperlink.RequestNavigateEvent };
+            forum.RaiseEvent(navigate); Check(navigate.Handled, "Forum event not handled"); Equal(ui.Opened.Last(), "https://bbs.gbtgame.me/");
+            Control<ScrollViewer>(window, "SettingsScroll").ScrollToTop(); window.UpdateLayout();
+            ui.OpenError = true; Click(Control<Button>(window, "OpenLog"));
+            Check(AllLogs(window).Contains("无法打开："), "Open failure invisible"); ui.OpenError = false;
+            Capture(window, "buttons-error", 900, 860, 96);
+            var logBounds = Control<TextBox>(window, "Details").TransformToAncestor(Control<Grid>(window, "ContentSections")).TransformBounds(new Rect(Control<TextBox>(window, "Details").RenderSize));
+            Check(logBounds.Top >= 0 && logBounds.Bottom <= Control<Grid>(window, "ContentSections").ActualHeight + 1, "Log section left the fixed content viewport");
+            ui.Hold = true; ui.Fail = false;
+            Click(Control<Button>(window, "InstallButton")); Equal(ui.Created, 2);
+            Equal(Control<Button>(window, "OpenLog").Visibility, Visibility.Collapsed);
+            Equal(Control<Button>(window, "OpenBackup").Visibility, Visibility.Collapsed);
+            ui.Session.Gate.Set(); PumpUntil(() => model.State == "Success" && ui.Session.Disposed);
+            Check(!ui.Session.Launched, "Launch opt-out was lost"); Equal(model.Stages[5].State, "已跳过");
+            Check(!Control<UIElement>(window, "OptionsEditor").IsEnabled, "Success options remained editable");
+            Capture(window, "buttons-success", 900, 860, 96);
+            Click(Control<Button>(window, "InstallButton")); Check(!window.IsVisible, "Finish did not close the window"); Equal(ui.Created, 2);
+        }
+        finally { if (ui.Session != null && !ui.Session.Disposed) ui.Session.Gate.Set(); PumpUntil(() => !model.IsBusy); window.Close(); }
+    }
+    private static void TestRecoveryControls()
+    {
+        var ui = new FakeInteraction { Fail = true, LogError = true }; var window = new InstallerWindow(ui); window.Show();
+        var model = (InstallerViewModel)window.DataContext;
+        try
+        {
+            Toggle(window, "ActivateProBox", false); Toggle(window, "DisableUpdatesBox", false);
+            Click(Control<Button>(window, "InstallButton")); Equal(model.State, "Error"); Equal(ui.Created, 0);
+            Check(Control<TextBox>(window, "Details").Text.Length > 0, "Invalid options produced no guidance");
+            Toggle(window, "DevToolsBox", true);
+            Click(Control<Button>(window, "InstallButton")); PumpUntil(() => model.State == "Error" && ui.Session.Disposed);
+            Check(model.Message.Contains("fixture install failure"), "Log failure replaced the actual installation error");
+            Check(AllLogs(window).Contains("无法保存错误日志："), "Write failure not handled");
+            Check(AllLogs(window).Contains("无法关闭日志："), "Dispose failure not handled");
+            ui.Fail = false; ui.LogError = false;
+            Click(Control<Button>(window, "InstallButton")); PumpUntil(() => model.State == "Success" && ui.Session.Disposed);
+            Check(ui.Session.Launched, "Default launch choice was lost");
+            Check(ui.Config.PatchTypes.SetEquals(new[] { EPatchType.DevToolsOnF12 }), "GUI choices lost at session boundary");
+        }
+        finally { PumpUntil(() => !model.IsBusy); window.Close(); }
+    }
+    private static void TestReopenedLauncher()
+    {
+        var ui = new FakeInteraction();
+        var first = new InstallerWindow(ui, new FakeBackups()); first.Show();
+        try
+        {
+            ((InstallerViewModel)first.DataContext).Options.DevTools = true;
+            ((InstallerViewModel)first.DataContext).Options.Strategy = EPatchStrategy.Supervised;
+            Click(Control<Button>(first, "InstallButton"));
+            PumpUntil(() => ((InstallerViewModel)first.DataContext).State == "Success" && ui.Session.Disposed);
+        }
+        finally { first.Close(); }
+        var reopened = new InstallerWindow(ui, new FakeBackups()); reopened.Show();
+        try
+        {
+            PumpUntil(() => reopened.IsLoaded);
+            Equal(Control<Button>(reopened, "InstallButton").Content, "启动 Wand");
+            Check(((InstallerViewModel)reopened.DataContext).Options.DevTools, "Saved features lost on reopen");
+            Equal(((InstallerViewModel)reopened.DataContext).Options.Strategy, EPatchStrategy.Supervised);
+            Capture(reopened, "launcher-ready", 900, 860, 96);
+            Click(Control<Button>(reopened, "InstallButton"));
+            PumpUntil(() => ((InstallerViewModel)reopened.DataContext).State == "Success" && ui.Session.Disposed);
+            Check(ui.Session.ExistingRun, "Reopen called installation instead of existing launch");
+        }
+        finally { reopened.Close(); }
+        var disappeared = new InstallerWindow(ui, new FakeBackups()); disappeared.Show();
+        try
+        {
+            int created = ui.Created; ui.Installed = false;
+            Click(Control<Button>(disappeared, "InstallButton"));
+            Equal(ui.Created, created);
+            Check(!Control<Button>(disappeared, "InstallButton").IsEnabled, "Vanished install silently fell back to reinstall");
+            Click(Control<Button>(disappeared, "RefreshInstallation"));
+            Equal(Control<Button>(disappeared, "InstallButton").Content, "安装");
+        }
+        finally { disappeared.Close(); }
+    }
+
+    private static string AllLogs(InstallerWindow window)
+    {
+        var pages = (List<string>)typeof(InstallerWindow).GetField("logPages", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(window);
+        return string.Concat(pages);
+    }
+    private static void TestLongContent()
+    {
+        var backups = new FakeBackups();
+        for (int i = 1; i < 7; i++) backups.Entries.Add(new BackupEntry { Path = Path.Combine(backups.Root, "backup-" + i), Label = "备份 " + i, Summary = "Wand 用户配置", CanRestore = true });
+        var window = new InstallerWindow(new FakeInteraction(), backups); window.Show();
+        try
+        {
+            var model = (InstallerViewModel)window.DataContext;
+            for (int i = 0; i < 18; i++)
+            {
+                string script = Path.Combine(output, "很长的自定义脚本名称_" + new string('测', 70) + i + ".js");
+                File.WriteAllText(script, "void 0;"); model.Options.AddScript(script);
+            }
+            Control<Expander>(window, "OptionsExpander").IsExpanded = true;
+            model.Options.MoveScriptPage(-100);
+            var seenScripts = new HashSet<string>();
+            do
+            {
+                window.UpdateLayout();
+                foreach (var item in model.Options.VisibleScripts) seenScripts.Add(item.FullPath);
+                Equal(Control<ItemsControl>(window, "ScriptList").Items.Count, 2);
+                AssertNoScroll(window, "SettingsScroll"); AssertNoScroll(window, "ScriptScroll");
+                if (!model.Options.NextScripts) break;
+                Click(Control<Button>(window, "NextScripts"));
+            } while (true);
+            Equal(model.Options.Snapshot().CustomScriptPaths.Count, 18);
+            Equal(seenScripts.Count, 18); Check(!Control<Button>(window, "NextScripts").IsEnabled, "Last script page can advance");
+            Capture(window, "long-content-minimum", 900, 860, 96);
+            Check(Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().All(b => b.ActualWidth >= 36), "Long filename squeezed remove controls");
+            string longText = string.Join(Environment.NewLine, Enumerable.Range(0, 100).Select(i => i + " 中文日志🙂 " + new string('字', 90))) + Environment.NewLine;
+            var pages = InstallerWindow.PaginateLog(longText);
+            Equal(string.Concat(pages), longText); Check(pages.Count > 1, "Long log was truncated");
+            typeof(InstallerWindow).GetMethod("AppendLog", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(window, new object[] { longText });
+            Control<Expander>(window, "LogExpander").IsExpanded = true;
+            while (Control<Button>(window, "PreviousLog").IsEnabled) Click(Control<Button>(window, "PreviousLog"));
+            var seenLog = new StringBuilder();
+            do
+            {
+                window.UpdateLayout(); AssertNoScroll(window, "Details");
+                seenLog.Append(Control<TextBox>(window, "Details").Text);
+                if (!Control<Button>(window, "NextLog").IsEnabled) break;
+                Click(Control<Button>(window, "NextLog"));
+            } while (true);
+            Check(seenLog.ToString().Contains("99 中文日志🙂"), "Last log page missing");
+            Equal(seenLog.ToString(), AllLogs(window));
+            Capture(window, "long-log", 900, 860, 96);
+            Control<Expander>(window, "BackupsExpander").IsExpanded = true; SettleSections(window);
+            var seenBackups = new HashSet<string>();
+            do
+            {
+                window.UpdateLayout();
+                Equal(Control<ListBox>(window, "BackupList").Items.Count, 1);
+                seenBackups.Add(((BackupEntry)Control<ListBox>(window, "BackupList").SelectedItem).Path);
+                foreach (var scroll in Descendants(Control<ListBox>(window, "BackupList")).OfType<ScrollViewer>())
+                    Equal(scroll.VerticalOffset, 0d);
+                if (!Control<Button>(window, "NextBackups").IsEnabled) break;
+                Click(Control<Button>(window, "NextBackups"));
+            } while (true);
+            Equal(seenBackups.Count, 7);
+            string selectedPath = ((BackupEntry)Control<ListBox>(window, "BackupList").SelectedItem).Path;
+            Click(Control<Button>(window, "RestoreBackup")); Click(Control<Button>(window, "ConfirmBackup"));
+            PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled);
+            Equal(backups.LastPath, selectedPath);
+            Capture(window, "paged-backups", 900, 860, 96);
+            window.WindowState = WindowState.Maximized; window.UpdateLayout();
+            Check(Control<Button>(window, "InstallButton").ActualWidth >= 118, "Maximized action collapsed");
+            window.WindowState = WindowState.Normal;
+        }
+        finally { window.Close(); }
+    }
+    private static void AssertNoScroll(InstallerWindow window, string name)
+    {
+        var viewer = window.FindName(name) as ScrollViewer;
+        if (viewer != null) {
+            Check(viewer.ExtentHeight <= viewer.ViewportHeight + 1, "Content needs scrolling: " + name); Equal(viewer.VerticalOffset, 0d);
+            var child = viewer.Content as FrameworkElement;
+            if (child != null) Check(child.ActualHeight <= viewer.ViewportHeight + 1, "Content clipped by disabled scrolling: " + name);
+            return;
+        }
+        var box = Control<TextBox>(window, name);
+        Check(box.ExtentHeight <= box.ViewportHeight + 1, "Log page needs scrolling"); Equal(box.VerticalOffset, 0d);
+        if (box.Text.Length > 0) Check(box.GetRectFromCharacterIndex(box.Text.Length - 1).Bottom <= box.ActualHeight - box.Padding.Bottom + 1, "Last log character clipped");
+    }
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i); yield return child;
+            foreach (var nested in Descendants(child)) yield return nested;
+        }
+    }
+    private sealed class FakeInteraction : IInstallerInteraction
+    {
+        public string[] Files = new string[0];
+        public bool SelectionError, OpenError, Hold, Fail, LogError;
+        public int Created, Selected;
+        public PatchConfig Config;
+        public FakeSession Session;
+        public List<string> Opened = new List<string>();
+        public bool Installed;
+        public PatchConfig SavedConfig;
+        public LauncherSnapshot InspectInstallation() { return new LauncherSnapshot { Exists = Installed, Version = "12.68.0", Config = SavedConfig == null ? null : WandEnhancer.Fork.PatchConfigs.Copy(SavedConfig) }; }
+        public string[] SelectScripts(Window owner) { Selected++; if (SelectionError) throw new IOException("dialog unavailable"); return Files; }
+        public void Open(string path) { if (OpenError) throw new IOException("file association unavailable"); Opened.Add(path); }
+        public IInstallerSession CreateSession(Action<int, string> report, PatchConfig config)
+        {
+            Created++; Config = config; Session = new FakeSession(report, Hold, Fail, LogError, () => { Installed = true; SavedConfig = WandEnhancer.Fork.PatchConfigs.Copy(config); }); return Session;
+        }
+    }
+    private sealed class FakeSession : IInstallerSession
+    {
+        private readonly Action<int, string> report;
+        private readonly bool fail, logError;
+        public readonly ManualResetEventSlim Gate = new ManualResetEventSlim(false);
+        public volatile bool Started;
+        public bool Disposed, FailureRecorded, Launched, ExistingRun;
+        private readonly Action completed;
+        public string LogPath { get; private set; }
+        public string BackupPath { get; private set; }
+        public FakeSession(Action<int, string> report, bool hold, bool fail, bool logError, Action completed)
+        {
+            this.report = report; this.fail = fail; this.logError = logError; this.completed = completed;
+            BackupPath = Path.Combine(output, "fake-backup"); Directory.CreateDirectory(BackupPath);
+            LogPath = Path.Combine(BackupPath, "fixture.log"); File.WriteAllText(LogPath, "fixture only");
+            if (!hold) Gate.Set();
+        }
+        public void Install(bool launch)
+        {
+            Started = true; Launched = launch; report(3, "测试安装进度，不会改动真实应用。");
+            if (!Gate.Wait(10000)) throw new TimeoutException("Fixture release timed out");
+            if (fail) throw new IOException("fixture install failure");
+            completed(); report(6, "测试安装完成。");
+        }
+        public void StartExisting(bool launch) { ExistingRun = true; Install(launch); }
+        public void RecordFailure(Exception error) { FailureRecorded = true; if (logError) throw new IOException("fixture log write failure"); }
+        public void Dispose() { Disposed = true; Gate.Dispose(); if (logError) throw new IOException("fixture log close failure"); }
+    }
+
+    private static void Capture(InstallerWindow window, string name, double width, double height, double dpi)
+    {
+        window.Width = width; window.Height = height; window.UpdateLayout();
+        window.Dispatcher.Invoke(DispatcherPriority.ApplicationIdle, new Action(() => {}));
+        window.Dispatcher.Invoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() => {}));
+        window.UpdateLayout();
+        SettleSections(window);
+        foreach (string namePart in new[] { "PreviousScripts", "NextScripts", "PreviousLog", "NextLog", "PreviousBackups", "NextBackups" })
+        {
+            var pager = Control<Button>(window, namePart);
+            if (!pager.IsVisible) continue;
+            Equal(pager.ActualHeight, 26d); Equal(pager.FontSize, 11d);
+            Check(pager.ActualWidth >= 52, "Inconsistent pager width");
+        }
+        var message = (TextBlock)window.FindName("MessageText");
+        Check(((FrameworkElement)window.FindName("StatusPanel")).ActualHeight < 145, "Status block is too large: " + name);
+        Check(message.ActualHeight >= 15, "Status message lost its layout space: " + name);
+        foreach (string controlName in new[] { "InstallButton", "Launch", "AuthorText", "StatusPanel", "ContentSections", "OpenLog", "OpenBackup", "RestoreBackup", "DeleteBackup", "RefreshBackups", "ConfirmBackup", "CancelBackup", "BackupsExpander", "LogExpander" })
+        {
+            var control = (FrameworkElement)window.FindName(controlName);
+            if (!control.IsVisible) continue;
+            var point = control.TranslatePoint(new Point(), window);
+            Check(control.ActualWidth > 0 && control.ActualHeight > 0 && point.X >= 0 && point.Y >= 0 && point.X + control.ActualWidth <= window.ActualWidth && point.Y + control.ActualHeight <= window.ActualHeight, "Control clipped: " + name + "/" + controlName);
+        }
+        var visual = (FrameworkElement)window.Content;
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(visual.ActualWidth * dpi / 96), (int)Math.Ceiling(visual.ActualHeight * dpi / 96), dpi, dpi, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using (var stream = File.Create(Path.Combine(output, name + ".png"))) encoder.Save(stream);
+    }
+
+    private static void Test(string name, Action action) { action(); passed++; Console.WriteLine("PASS " + name); }
+    private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
+    private static void Equal<T>(T actual, T expected) { Check(Equals(actual, expected), "Expected " + expected + ", got " + actual); }
+    private static void Throws(Action action) { bool threw = false; try { action(); } catch (InvalidOperationException) { threw = true; } Check(threw, "Expected operation failure"); }
+
+    private sealed class FakeSteps : IInstallSteps
+    {
+        public List<string> Calls = new List<string>();
+        public string FailAt;
+        public bool Verified = true;
+        private void Call(string name) { Calls.Add(name); if (name == FailAt) throw new InvalidOperationException("Injected " + name + " failure"); }
+        public void Validate() { Call("validate"); }
+        public void Backup() { Call("backup"); }
+        public void Remove() { Call("remove"); }
+        public void Install() { Call("install"); }
+        public void Patch() { Call("patch"); }
+        public bool Verify() { Call("verify"); return Verified; }
+        public void SaveState() { Call("state"); }
+        public void Launch() { Call("launch"); }
+    }
+}

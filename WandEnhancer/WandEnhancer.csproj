@@ -86,6 +86,7 @@
         <Compile Include="Core\Patching\Shared\IconTransplant.cs" />
         <Compile Include="Core\Patching\Shared\LauncherDeployment.cs" />
         <Compile Include="Core\Patching\Content\AsarContentPatcher.cs" />
+        <Compile Include="Core\Patching\Content\PatchVerification.cs" />
         <Compile Include="Core\Patching\Content\RemotePanelInjector.cs" />
         <Compile Include="Core\Patching\Strategies\IPatchStrategy.cs" />
         <Compile Include="Core\Patching\Strategies\StrategyFactory.cs" />

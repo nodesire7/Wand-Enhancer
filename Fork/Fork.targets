@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WandEnhancer'">
+    <StartupObject>WandEnhancer.Fork.ForkEntry</StartupObject>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'WandEnhancer'">
+    <Compile Include="$(MSBuildThisFileDirectory)Cli\*.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Shared\*.cs" />
+  </ItemGroup>
+</Project>

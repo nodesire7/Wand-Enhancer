@@ -47,6 +47,7 @@ jobs:
           git remote add upstream https://github.com/k1tbyte/Wand-Enhancer.git 2>/dev/null || true
           git fetch --no-tags upstream master
           sha=$(git rev-parse --short upstream/master)
+          fork_head=$(git rev-parse HEAD)
 
           if git merge-base --is-ancestor upstream/master HEAD; then
             echo "Fork already contains upstream/$sha"
@@ -71,13 +72,22 @@ jobs:
             git commit -m "chore(sync): merge upstream $sha (conflicts resolved upstream-side)"
           fi
 
+          # Keep fork-owned functionality even when a shared workflow conflicts upstream.
+          git restore --source "$fork_head" --staged --worktree -- Fork \
+            .github/workflows/build.yml .github/workflows/sync-upstream.yml \
+            scripts/build-distribution.ps1 scripts/test-fork.ps1 scripts/reapply-fork.ps1 \
+            scripts/write-release-notes.ps1 scripts/test-installer.ps1 scripts/tests/installer.cs \
+            scripts/new-test-sandbox.ps1 scripts/sandbox-test.ps1 scripts/test-real-package.ps1
+
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Reapply fork branding
         if: steps.merge.outputs.changed == 'true'
         shell: pwsh
-        run: ./scripts/apply-branding.ps1
+        run: |
+          ./scripts/apply-branding.ps1
+          ./scripts/reapply-fork.ps1
 
       - name: Commit branding and push
         if: steps.merge.outputs.changed == 'true'
@@ -122,6 +132,13 @@ jobs:
         shell: pwsh
         run: ./build.ps1 -Configuration Release
 
+      - name: Build installer and test fork CLI
+        shell: pwsh
+        run: |
+          ./scripts/build-distribution.ps1
+          ./scripts/test-fork.ps1
+          ./scripts/test-installer.ps1
+
       - name: Publish rolling release
         shell: pwsh
         env:
@@ -139,7 +156,5 @@ jobs:
             gh release create $tag --title $branding.product --notes-file $notes --latest --target master
           }
 
-          $exe = 'WandEnhancer/bin/Release/WandEnhancer.exe'
-          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  WandEnhancer.exe" | Set-Content 'WandEnhancer.exe.sha256' -Encoding ascii
-          gh release upload $tag $exe 'WandEnhancer.exe.sha256' --clobber
+          gh release upload $tag 'WandEnhancer/bin/Release/WandEnhancer.exe' 'WandEnhancer/bin/Release/WandEnhancer.exe.sha256' 'dist/Release/WandSetup.exe' 'dist/Release/SHA256SUMS.txt' 'dist/Release/使用说明.txt' --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }

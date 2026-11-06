@@ -21,6 +21,7 @@ paths:
 
 - `EPatchType.ActivatePro` is independent of the remote panel and the bridge. It wraps the returned promise of `getUserAccount`, `setAccountWandBrandExperience` and `setAccountLanguage` so `subscription:{period:"yearly",state:"active"}` is injected before the response reaches the store. `setAccountReducer` rewrites the `ACTION_SET_ACCOUNT` reducer so any other account write (periodic `refreshAccount`, push or profile updates) keeps Pro.
 - Pro is `!!account.subscription`; flags and `512` are irrelevant. `setAccountWandBrandExperience` is missing on some builds, so it is optional through `CapabilityHints`.
+- `initialAccountState` anchors on the store constructor's `logDispatchedActions` option and normalizes its initial state argument with `pro-initial-state.js`. Hydrated cached accounts reach this constructor before any API refresh or reducer dispatch. Preserve signed-out/null accounts and never mutate the persisted input. `scripts/tests/pro-startup.cjs` executes this path for both prettified and minified fixtures.
 
 ## DevTools on F12
 

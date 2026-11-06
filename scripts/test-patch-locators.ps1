@@ -72,6 +72,10 @@ function Test-Bundles([string]$Name, [IO.FileInfo[]]$Files, [string]$Output) {
         & node --check $target
         if ($LASTEXITCODE -ne 0) { throw "$Name produced invalid JavaScript in $file" }
     }
+    if ($Name -ne 'Real bundles') {
+        & node (Join-Path $PSScriptRoot 'tests\pro-startup.cjs') (Join-Path $Output 'index.js')
+        if ($LASTEXITCODE -ne 0) { throw "$Name failed cached account startup regression" }
+    }
     Write-Host "$Name passed: $count patches, $($sources.Count) parsed bundles."
 }
 

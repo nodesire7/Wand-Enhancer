@@ -118,9 +118,10 @@ namespace WandEnhancer.Core.Services
 
         private static void StartDetached(string watcherPath, string squirrelRoot)
         {
+            // A long-lived watcher must not inherit the calling CLI's redirected pipes.
             Process.Start(new ProcessStartInfo(watcherPath, $"--watch-updates \"{squirrelRoot}\"")
             {
-                UseShellExecute = false,
+                UseShellExecute = true,
                 WorkingDirectory = Path.GetDirectoryName(watcherPath),
                 WindowStyle = ProcessWindowStyle.Hidden,
                 CreateNoWindow = true

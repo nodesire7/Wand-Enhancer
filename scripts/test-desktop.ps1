@@ -73,7 +73,7 @@ try {
     [IO.Directory]::CreateDirectory($unpackedBackup) | Out-Null
     [IO.File]::WriteAllText((Join-Path $unpackedBackup 'original.txt'), 'original unpacked')
     Assert-Equal ($hasBackup.Invoke($null, $installArgument)) $true 'Complete backup'
-    Assert-Equal ($isPatched.Invoke($null, $installArgument)) $true 'Legacy complete backups'
+    Assert-Equal ($isPatched.Invoke($null, $installArgument)) $false 'Backups alone do not prove applied content'
     [IO.File]::WriteAllText($marker, '')
     Assert-Equal ($hasBackup.Invoke($null, $installArgument)) $true 'Restorable unfinished patch'
     Assert-Equal ($isPatched.Invoke($null, $installArgument)) $false 'Unfinished patch'
@@ -100,7 +100,7 @@ try {
     Assert-Equal (Test-Path $unpackedBackup) $true 'Rollback preserves unpacked backup'
 
     [IO.File]::Delete($marker)
-    Assert-Equal ($isPatched.Invoke($null, $installArgument)) $true 'Completed retry'
+    Assert-Equal ($isPatched.Invoke($null, $installArgument)) $false 'Removing a failure marker does not verify content'
     [IO.File]::WriteAllText($marker, '')
     [IO.File]::WriteAllText((Join-Path $scratch 'FixtureClient.exe.stub'), 'original launcher')
     $autoPatchConfig = Join-Path $scratch ($assembly.GetType('WandEnhancer.Constants', $true).GetField('AutoPatchConfigFileName').GetRawConstantValue())
@@ -109,11 +109,13 @@ try {
     }
     $watcherExe = Join-Path $scratch 'WandEnhancerWatcher.exe'
     [IO.File]::WriteAllText($watcherExe, 'fixture')
+    $appliedSelection = Join-Path $resources '.applied-patch.json'
+    [IO.File]::WriteAllText($appliedSelection, '{"Strategy":1,"PatchTypes":[1]}')
 
     # Restore can only target this fixture's unique process name and scratch Squirrel root.
     Assert-Equal ([Diagnostics.Process]::GetProcessesByName($config.BrandName).Length) 0 'Fixture process isolation'
     $enhancerType.GetMethod('Restore').Invoke($enhancer, $null) | Out-Null
-    foreach ($path in $backup, $unpackedBackup, $marker) {
+    foreach ($path in $backup, $unpackedBackup, $marker, $appliedSelection) {
         Assert-Equal (Test-Path $path) $false 'Restore clears patch state'
     }
     Assert-Equal ([IO.File]::ReadAllText((Join-Path $scratch 'FixtureClient.exe'))) 'original launcher' 'Restore launcher'
