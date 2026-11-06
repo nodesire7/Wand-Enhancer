@@ -935,6 +935,13 @@ internal static class InstallerTests
         window.Dispatcher.Invoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() => {}));
         window.UpdateLayout();
         SettleSections(window);
+        foreach (string namePart in new[] { "PreviousScripts", "NextScripts", "PreviousLog", "NextLog", "PreviousBackups", "NextBackups" })
+        {
+            var pager = Control<Button>(window, namePart);
+            if (!pager.IsVisible) continue;
+            Equal(pager.ActualHeight, 26d); Equal(pager.FontSize, 11d);
+            Check(pager.ActualWidth >= 52, "Inconsistent pager width");
+        }
         var message = (TextBlock)window.FindName("MessageText");
         Check(((FrameworkElement)window.FindName("StatusPanel")).ActualHeight < 145, "Status block is too large: " + name);
         Check(message.ActualHeight >= 15, "Status message lost its layout space: " + name);

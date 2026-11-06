@@ -15,3 +15,5 @@ The first focus target is the strategy picker. Keyboard focus uses palette-based
 Configuration backups always have a visible section header with a count. The section displays the root and selected full paths, list, restore/delete/open/refresh controls, empty state and local confirmation overlay. Confirmation preserves list geometry. Restore first saves current user configuration and rolls back on failure; legacy uninstall/startup/protocol snapshots are never replayed. Backup operations prevent concurrent installation and closing.
 
 Header clicks A/B/C select that section and collapse both others. Re-clicking the selected header keeps it open. Script pages show two complete filenames, backups show one full record and wrapped paths, and logs split at Unicode text-element boundaries into bounded pages. Full configuration selections and saved log data remain intact. Page controls replace wheel scrolling; empty/first/last pages disable invalid navigation.
+
+All three page controls share 26-DIP buttons, 11-DIP type, a 52-DIP minimum width and the same previous/next order and spacing.
