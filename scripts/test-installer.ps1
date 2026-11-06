@@ -16,7 +16,7 @@ $references = @('mscorlib.dll', 'System.dll', 'System.Core.dll', 'System.Xaml.dl
 $testExe = Join-Path $OutputDirectory 'WandInstaller.Tests.exe'
 & $csc /nologo /noconfig /nostdlib+ /target:exe "/out:$testExe" "/reference:$assembly" @references (Join-Path $PSScriptRoot 'tests\installer.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Installer test compilation failed.' }
-& $testExe $OutputDirectory
+& $testExe $OutputDirectory (Join-Path $root 'WandEnhancer\bin\Release\WandEnhancer.exe')
 if ($LASTEXITCODE -ne 0) { throw 'Installer tests failed.' }
 
 function Invoke-Check([string]$ExePath, [int]$ExpectedCode) {

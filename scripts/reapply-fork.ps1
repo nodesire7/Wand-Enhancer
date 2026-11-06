@@ -18,4 +18,16 @@ if (-not $readme.Contains($notice)) {
     $readme = $notice + "`r`n`r`n" + $readme
     [IO.File]::WriteAllText($readmePath, $readme, [Text.UTF8Encoding]::new($false))
 }
-Write-Host 'Fork CLI hook and documentation link are present.'
+$watcherPath = Join-Path $root 'WandEnhancer\Core\Services\WatcherAutostart.cs'
+$watcher = [IO.File]::ReadAllText($watcherPath)
+$anchor = $watcher.IndexOf('private static void StartDetached(')
+if ($anchor -lt 0) { throw 'Cannot locate the detached watcher startup hook.' }
+$tail = $watcher.Substring($anchor)
+if ($tail.Contains('UseShellExecute = false,')) {
+    if ($Check) { throw 'Watcher startup must detach from redirected CLI pipes.' }
+    $watcher = $watcher.Substring(0, $anchor) + $tail.Replace('UseShellExecute = false,', 'UseShellExecute = true,')
+    $bytes = [IO.File]::ReadAllBytes($watcherPath)
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191
+    [IO.File]::WriteAllText($watcherPath, $watcher, [Text.UTF8Encoding]::new($hasBom))
+} elseif (-not $tail.Contains('UseShellExecute = true,')) { throw 'Unrecognized watcher startup implementation; review CLI pipe isolation.' }
+Write-Host 'Fork CLI, documentation and detached watcher hooks are present.'

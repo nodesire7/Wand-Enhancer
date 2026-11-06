@@ -15,11 +15,23 @@ internal static class InstallerTests
 {
     private static int passed;
     private static string output;
+    private static string corePath;
     private static readonly string[] Order = { "validate", "backup", "remove", "install", "patch", "verify", "launch" };
 
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--watch-updates")
+        {
+            File.WriteAllText(Path.Combine(args[1], "watcher.pid"), System.Diagnostics.Process.GetCurrentProcess().Id.ToString());
+            System.Threading.Thread.Sleep(30000); return 0;
+        }
+        if (args.Length > 0 && args[0] == "--watch-parent")
+        {
+            var core = System.Reflection.Assembly.LoadFrom(args[1]);
+            core.GetType("WandEnhancer.Core.Services.WatcherAutostart", true).GetMethod("StartDetached", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).Invoke(null, new object[] { args[2], args[3] });
+            Console.WriteLine("started"); return 0;
+        }
         if (args.Length > 0 && args[0] == "--uninstall")
         {
             File.WriteAllText(Environment.GetEnvironmentVariable("WAND_REMOVAL_TEST_MARKER"), "confirmation-required");
@@ -31,6 +43,7 @@ internal static class InstallerTests
             Console.WriteLine(InstallEngine.Json.Serialize(args.Skip(1).ToArray())); return 0;
         }
         output = args[0];
+        corePath = args[1];
         Directory.CreateDirectory(output);
         try
         {
@@ -100,6 +113,7 @@ internal static class InstallerTests
                 options.AutoApply = true; Check(!options.DisableUpdates, "Auto-apply did not allow updates");
             });
             Test("script selections are deduplicated, enable remote access and survive old installation removal", TestScriptOptions);
+            Test("auto-apply watcher does not inherit the CLI output pipe", TestWatcherPipe);
             Test("silent removal never launches the original interactive uninstaller", TestSilentRemoval);
             Test("shortcut cleanup backs up only links targeting the removed installation", TestShortcuts);
             Test("silent removal rejects unsafe targets before any stop or cleanup action", () => {
@@ -167,6 +181,34 @@ internal static class InstallerTests
             Equal(protocols.Length, 1); Equal(protocols[0], @"Software\Classes\wemod");
         }
         finally { Registry.CurrentUser.DeleteSubKeyTree(keyPath, false); }
+    }
+
+    private static void TestWatcherPipe()
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), "wand-watch-pipe-test-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch);
+        string child = Path.Combine(scratch, "WandEnhancerWatcher.exe");
+        string pidFile = Path.Combine(scratch, "watcher.pid");
+        File.Copy(System.Reflection.Assembly.GetExecutingAssembly().Location, child);
+        File.Copy(typeof(InstallerWindow).Assembly.Location, Path.Combine(scratch, "WandSetup.exe"));
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location,
+                WandEnhancer.Fork.Arguments.Join(new[] { "--watch-parent", corePath, child, scratch })) { UseShellExecute = false, RedirectStandardOutput = true };
+            using (var parent = System.Diagnostics.Process.Start(start))
+            {
+                var read = parent.StandardOutput.ReadToEndAsync(); Check(parent.WaitForExit(5000), "Watcher starter did not exit");
+                Check(read.Wait(1500), "Long-running watcher kept CLI output open");
+                Equal(parent.ExitCode, 0);
+            }
+            for (int i = 0; i < 50 && !File.Exists(pidFile); i++) System.Threading.Thread.Sleep(100);
+            Check(File.Exists(pidFile), "Watcher did not start");
+        }
+        finally
+        {
+            if (File.Exists(pidFile)) using (var process = System.Diagnostics.Process.GetProcessById(int.Parse(File.ReadAllText(pidFile))))
+                if (!process.HasExited && string.Equals(process.MainModule.FileName, child, StringComparison.OrdinalIgnoreCase)) { process.Kill(); process.WaitForExit(5000); }
+            Directory.Delete(scratch, true);
+        }
     }
 
     private static void TestScriptOptions()
