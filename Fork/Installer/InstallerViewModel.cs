@@ -23,13 +23,14 @@ namespace WandEnhancer.Fork.Installer
     {
         public ObservableCollection<InstallStage> Stages { get; } = new ObservableCollection<InstallStage>();
         public string Version { get; }
+        public PatchOptionsViewModel Options { get; } = new PatchOptionsViewModel();
         private string state = "Ready";
         private int progress;
         private string message = "准备好开始安装";
         public string State { get => state; private set { state = value; Changed(nameof(State)); Changed(nameof(IsBusy)); Changed(nameof(ActionText)); Changed(nameof(Heading)); } }
         public bool IsBusy => State == "Running";
         public string ActionText => State == "Success" ? "完成" : State == "Error" ? "重试安装" : IsBusy ? "正在安装…" : "安装";
-        public string Heading => State == "Success" ? "一切就绪，祝游玩愉快" : State == "Error" ? "安装已停止" : IsBusy ? "正在为你准备 Wand" : "安装 Wand";
+        public string Heading => State == "Success" ? "安装完成" : State == "Error" ? "安装已停止" : IsBusy ? "正在安装 Wand" : "安装 Wand";
         public int Progress { get => progress; private set { progress = value; Changed(nameof(Progress)); Changed(nameof(ProgressLabel)); } }
         public string ProgressLabel => Progress + " / 6 步完成";
         public string Message { get => message; private set { message = value; Changed(nameof(Message)); } }

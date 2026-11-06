@@ -9,6 +9,8 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Navigation;
 using WandEnhancer.Branding;
+using Microsoft.Win32;
+using System.Windows.Controls;
 
 namespace WandEnhancer.Fork.Installer
 {
@@ -40,11 +42,10 @@ namespace WandEnhancer.Fork.Installer
         {
             if (args.PropertyName != nameof(InstallerViewModel.State)) return;
             InstallButton.IsEnabled = !model.IsBusy;
+            OptionsEditor.IsEnabled = !model.IsBusy && model.State != "Success";
             Launch.IsEnabled = !model.IsBusy && model.State != "Success";
             StatusTitle.Text = model.State == "Success" ? "安装完成" : model.State == "Error" ? "需要处理一个问题" : model.IsBusy ? "安装进行中" : "准备就绪";
-            MessageText.Foreground = (Brush)new BrushConverter().ConvertFromString(model.State == "Error" ? "#FFB5B5" : "#B5C0D1");
-            StateIcon.Stroke = (Brush)new BrushConverter().ConvertFromString(model.State == "Error" ? "#FFB5B5" : "#68DDBB");
-            StateIcon.Data = Geometry.Parse(model.State == "Success" ? "M 2,12 L 8,18 L 21,3" : model.State == "Error" ? "M 10,2 L 10,15 M 10,21 L 10,23" : "M 10,5 L 10,22 M 4,16 L 10,22 L 16,16 M 2,27 L 18,27");
+            MessageText.Foreground = (Brush)FindResource(model.State == "Error" ? "Destructive" : "MutedForeground");
         }
 
         private async void InstallClick(object sender, RoutedEventArgs args)
@@ -57,11 +58,12 @@ namespace WandEnhancer.Fork.Installer
             InstallEngine engine = null;
             try
             {
+                var config = model.Options.Snapshot();
                 engine = new InstallEngine((step, text) => Dispatcher.Invoke(() =>
                 {
                     model.Report(step, text);
                     AppendLog(text);
-                }));
+                }), config);
                 await Task.Run(() => engine.Install(launch));
                 model.Succeed(launch);
             }
@@ -98,6 +100,20 @@ namespace WandEnhancer.Fork.Installer
         private void OpenLogClick(object sender, RoutedEventArgs args) => Open(logPath);
         private void OpenBackupClick(object sender, RoutedEventArgs args) => Open(backupPath);
         private void ForumNavigate(object sender, RequestNavigateEventArgs args) { Open(ForumLink.NavigateUri.AbsoluteUri); args.Handled = true; }
+
+        private void AddScriptClick(object sender, RoutedEventArgs args)
+        {
+            var dialog = new OpenFileDialog { Filter = "JavaScript 文件 (*.js)|*.js", Multiselect = true, CheckFileExists = true };
+            if (dialog.ShowDialog(this) != true) return;
+            try { foreach (string path in dialog.FileNames) model.Options.AddScript(path); }
+            catch (Exception error) { AppendLog(error.Message); LogExpander.IsExpanded = true; }
+        }
+
+        private void RemoveScriptClick(object sender, RoutedEventArgs args)
+        {
+            var script = (sender as Button)?.Tag as SelectedScript;
+            if (script != null) model.Options.Scripts.Remove(script);
+        }
 
         private void Open(string path)
         {

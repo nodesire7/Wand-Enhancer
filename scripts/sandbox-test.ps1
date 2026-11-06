@@ -35,7 +35,7 @@ try {
     $checks.Add('preflight')
     [void](Invoke-TestExe 'WandSetup.exe' @('--install', '--no-launch'))
     $root = Join-Path $env:LOCALAPPDATA 'Wand'
-    $state = Invoke-TestExe 'WandEnhancer.exe' @('--cli', 'status', '--path', $root, '--expected-version', '12.68.0')
+    $state = Invoke-TestExe 'WandSetup.exe' @('--cli', 'status', '--path', $root, '--expected-version', '12.68.0')
     Assert $state.data.patched 'Fresh install is not patched'
     Assert (@(Get-Process Wand -ErrorAction SilentlyContinue).Count -eq 0) 'Wand started before the explicitly requested launch'
     $checks.Add('fresh install, static patch and no premature first launch')
@@ -53,12 +53,12 @@ try {
     Assert (-not (Get-ItemProperty 'HKCU:\Software\Wand' -Name SandboxOldValue -ErrorAction SilentlyContinue)) 'Old registry value remained'
     $checks.Add('old installation removal, configuration backup and registry cleanup')
 
-    [void](Invoke-TestExe 'WandEnhancer.exe' @('--cli', 'restore', '--path', $root))
-    $state = Invoke-TestExe 'WandEnhancer.exe' @('--cli', 'status', '--path', $root)
+    [void](Invoke-TestExe 'WandSetup.exe' @('--cli', 'restore', '--path', $root))
+    $state = Invoke-TestExe 'WandSetup.exe' @('--cli', 'status', '--path', $root)
     Assert (-not $state.data.patched) 'Restore left a patched installation'
     $checks.Add('CLI restore')
-    [void](Invoke-TestExe 'WandEnhancer.exe' @('--cli', 'patch', '--path', $root, '--expected-version', '12.68.0'))
-    [void](Invoke-TestExe 'WandEnhancer.exe' @('--cli', 'launch', '--path', $root, '--strategy', 'static'))
+    [void](Invoke-TestExe 'WandSetup.exe' @('--cli', 'patch', '--path', $root, '--expected-version', '12.68.0'))
+    [void](Invoke-TestExe 'WandSetup.exe' @('--cli', 'launch', '--path', $root, '--strategy', 'static'))
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
         $running = @(Get-Process Wand -ErrorAction SilentlyContinue)

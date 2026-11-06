@@ -37,6 +37,9 @@ try {
         $config.PatchTypes = [Activator]::CreateInstance([Collections.Generic.HashSet``1].MakeGenericType($patchType))
         foreach ($name in @('ActivatePro', 'DisableUpdates', 'DevToolsOnF12', 'RemoteWebPanelPreview')) { [void]$config.PatchTypes.Add([Enum]::Parse($patchType, $name)) }
         $config.Strategy = [Enum]::Parse($assembly.GetType('WandEnhancer.Models.EPatchStrategy'), $strategy)
+        $customScript = Join-Path $scratch ("user-$strategy.js")
+        [IO.File]::WriteAllText($customScript, 'globalThis.__wandSetupOptionsFixture = true;')
+        $config.CustomScriptPaths.Add($customScript)
         $loggerType = [Action``2].MakeGenericType([string], $assembly.GetType('WandEnhancer.Core.ELogType'))
         $logger = { param($message, $level) Write-Host "$level $message" } -as $loggerType
         $type = $assembly.GetType('WandEnhancer.Core.Enhancer')
@@ -53,13 +56,17 @@ try {
             }
             $bundleCount = $bundles.Count
             if (-not (Test-Path -LiteralPath (Join-Path $unpacked 'remote-panel\bridge.cjs'))) { throw 'Remote bridge was not deployed.' }
+            $injectedScript = Join-Path $unpacked ("remote-panel\renderer-scripts\user-$strategy.js")
+            if (-not (Test-Path -LiteralPath $injectedScript) -or [IO.File]::ReadAllText($injectedScript) -ne 'globalThis.__wandSetupOptionsFixture = true;') { throw 'Selected custom script was not injected.' }
+            & node --check $injectedScript
+            if ($LASTEXITCODE -ne 0) { throw 'Custom script syntax failed.' }
             & node --check (Join-Path $unpacked 'remote-panel\bridge.cjs')
             if ($LASTEXITCODE -ne 0) { throw 'Remote bridge syntax failed.' }
         } finally { $engine.Restore() }
         $after = Hashes $fixture
         if ($before.Count -ne $after.Count) { throw 'Restore changed the original file count.' }
         foreach ($name in $before.Keys) { if ($after[$name] -ne $before[$name]) { throw "Restore SHA256 mismatch: $name" } }
-        $results.Add(@{ strategy = $strategy; filesRestored = $before.Count; javascriptBundles = $bundleCount; patches = @('pro', 'disable-updates', 'devtools', 'remote-panel'); success = $true })
+        $results.Add(@{ strategy = $strategy; filesRestored = $before.Count; javascriptBundles = $bundleCount; customScript = $true; patches = @('pro', 'disable-updates', 'devtools', 'remote-panel'); success = $true })
         Write-Host "$strategy passed: four patch options, JS syntax, remote bridge and $($before.Count) restored file hashes."
     }
     @{ success = $true; results = @($results); sourceVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $source 'Wand.exe')).ProductVersion } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $OutputPath -Encoding UTF8

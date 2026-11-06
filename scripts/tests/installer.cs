@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using WandEnhancer.Fork.Installer;
+using WandEnhancer.Models;
 
 internal static class InstallerTests
 {
@@ -89,6 +90,16 @@ internal static class InstallerTests
                 finally { Environment.SetEnvironmentVariable("WAND_INSTALLER_TEST_ROOT", null); }
             });
             Test("registry backup preserves kinds, binary values, strings and subkeys", TestRegistry);
+            Test("all enhancer options reach an isolated PatchConfig snapshot", () => {
+                var options = new PatchOptionsViewModel { Strategy = EPatchStrategy.Supervised, ActivatePro = false, DevTools = true, RemotePanel = true, AutoApply = true };
+                var snapshot = options.Snapshot();
+                Equal(snapshot.Strategy, EPatchStrategy.Supervised); Check(snapshot.AutoApplyAfterUpdate, "Auto-apply lost");
+                Check(snapshot.PatchTypes.SetEquals(new[] { EPatchType.DevToolsOnF12, EPatchType.RemoteWebPanelPreview }), "Patch choices lost");
+                options.ActivatePro = true; Check(!snapshot.PatchTypes.Contains(EPatchType.ActivatePro), "Snapshot changed with UI");
+                options.DisableUpdates = true; Check(!options.AutoApply, "Conflicting update options enabled");
+                options.AutoApply = true; Check(!options.DisableUpdates, "Auto-apply did not allow updates");
+            });
+            Test("script selections are deduplicated, enable remote access and survive old installation removal", TestScriptOptions);
             Test("silent removal never launches the original interactive uninstaller", TestSilentRemoval);
             Test("shortcut cleanup backs up only links targeting the removed installation", TestShortcuts);
             Test("silent removal rejects unsafe targets before any stop or cleanup action", () => {
@@ -156,6 +167,42 @@ internal static class InstallerTests
             Equal(protocols.Length, 1); Equal(protocols[0], @"Software\Classes\wemod");
         }
         finally { Registry.CurrentUser.DeleteSubKeyTree(keyPath, false); }
+    }
+
+    private static void TestScriptOptions()
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), "wand-script-test-" + Guid.NewGuid().ToString("N"));
+        string old = Path.Combine(scratch, "old"); Directory.CreateDirectory(old);
+        string script = Path.Combine(old, "中文 script.js"); File.WriteAllText(script, "globalThis.fixture = true;");
+        try
+        {
+            var options = new PatchOptionsViewModel(); options.AddScript(script); options.AddScript(script);
+            Equal(options.Scripts.Count, 1); Check(options.RemotePanel, "Script did not enable remote access");
+            options.Strategy = EPatchStrategy.Supervised; options.AutoApply = true;
+            var cached = PatchScriptStore.Copy(options.Snapshot(), Path.Combine(scratch, "cache"));
+            File.Delete(script); Directory.Delete(old);
+            var saved = PatchScriptStore.Copy(cached, Path.Combine(scratch, "installed", "WandEnhancerScripts"));
+            Equal(saved.Strategy, EPatchStrategy.Supervised); Check(saved.AutoApplyAfterUpdate, "Persisted config lost auto-apply");
+            Equal(File.ReadAllText(saved.CustomScriptPaths.Single()), "globalThis.fixture = true;");
+            Equal(Path.GetFileName(saved.CustomScriptPaths.Single()), "中文 script.js");
+            Directory.Delete(Path.Combine(scratch, "cache"), true);
+            Check(File.Exists(saved.CustomScriptPaths.Single()), "Auto-apply script depends on temporary cache");
+            string configFile = Path.Combine(scratch, "selected.json");
+            File.WriteAllText(configFile, InstallEngine.Json.Serialize(saved));
+            var start = new System.Diagnostics.ProcessStartInfo(typeof(InstallerWindow).Assembly.Location,
+                WandEnhancer.Fork.Arguments.Join(new[] { "--cli", "patch", "--path", Path.Combine(scratch, "missing-install"), "--config", configFile })) {
+                    UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = new System.Text.UTF8Encoding(false)
+                };
+            using (var process = System.Diagnostics.Process.Start(start))
+            {
+                var read = process.StandardOutput.ReadToEndAsync(); Check(process.WaitForExit(15000), "Config round-trip timed out"); Check(read.Wait(5000), "Config output not closed");
+                Equal(process.ExitCode, 3);
+                var reply = InstallEngine.Json.Deserialize<Dictionary<string, object>>(read.Result);
+                Equal(Convert.ToInt32(reply["code"]), 3);
+            }
+            options.Scripts.Clear(); Check(!options.HasScripts, "Script empty state is stale");
+        }
+        finally { Directory.Delete(scratch, true); }
     }
 
     private static void TestSilentRemoval()
@@ -240,6 +287,9 @@ internal static class InstallerTests
             Equal(((TextBlock)window.FindName("AuthorText")).Text, "作者  A-FEI-");
             Equal(((Run)window.FindName("ForumText")).Text, "bbs.gbtgame.me");
             Equal(((Hyperlink)window.FindName("ForumLink")).NavigateUri.AbsoluteUri, "https://bbs.gbtgame.me/");
+            Check(((ScrollViewer)window.FindName("SettingsScroll")).VerticalScrollBarVisibility == ScrollBarVisibility.Hidden, "Scroll behavior differs from enhancer");
+            var originalPalette = new ResourceDictionary { Source = new Uri("/WandSetup;component/Style/ColorScheme.xaml", UriKind.Relative) };
+            Equal(((SolidColorBrush)window.FindResource("Background")).Color, ((SolidColorBrush)originalPalette["Background"]).Color);
             Capture(window, "ready", 960, 720, 96);
             model.Begin(); model.Report(3, "正在安装 Wand 12.68.0…"); window.UpdateLayout();
             Check(!((Button)window.FindName("InstallButton")).IsEnabled, "Busy install button enabled");
@@ -265,6 +315,7 @@ internal static class InstallerTests
         window.Dispatcher.Invoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() => {}));
         window.UpdateLayout();
         var message = (TextBlock)window.FindName("MessageText");
+        Check(((FrameworkElement)window.FindName("StatusPanel")).ActualHeight < 145, "Status block is too large: " + name);
         Check(message.ActualHeight >= 15, "Status message lost its layout space: " + name);
         foreach (string controlName in new[] { "InstallButton", "Launch", "AuthorText" })
         {

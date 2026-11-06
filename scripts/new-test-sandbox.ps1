@@ -19,7 +19,7 @@ $inputDirectory = Join-Path $OutputDirectory 'input'
 $resultDirectory = Join-Path $OutputDirectory 'results'
 foreach ($directory in @($inputDirectory, $resultDirectory)) { [IO.Directory]::CreateDirectory($directory) | Out-Null }
 Copy-Item -LiteralPath $SetupPath -Destination (Join-Path $inputDirectory 'WandSetup.exe') -Force
-Copy-Item -LiteralPath (Join-Path $repo 'dist\Release\WandEnhancer.exe') -Destination (Join-Path $inputDirectory 'WandEnhancer.exe') -Force
+if (Test-Path -LiteralPath (Join-Path $inputDirectory 'WandEnhancer.exe')) { Remove-Item -LiteralPath (Join-Path $inputDirectory 'WandEnhancer.exe') -Force }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'sandbox-test.ps1') -Destination (Join-Path $inputDirectory 'sandbox-test.ps1') -Force
 if ($WandInstallerPath) {
     $package = Get-Content -Raw -LiteralPath (Join-Path $repo 'Fork\Installer\package.json') | ConvertFrom-Json

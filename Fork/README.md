@@ -1,8 +1,8 @@
 # GBTGAME CLI 与一键安装
 
-本分支保留原有图形界面，并在同一个 `WandEnhancer.exe` 中提供 CLI。安装助手 `WandSetup.exe` 内置同一次构建的 CLI，避免调用错版本。增强器版本继续来自上游 AssemblyVersion；JSON 同时返回源码构建号 `build`，CLI 协议版本另为 `1`。
+用户交付文件只有 `WandSetup.exe`，已内置同一次构建的增强器与 CLI；完整离线版还内置 Wand 12.68.0 安装包。无需同目录的 WandEnhancer.exe，`WandSetup.exe --cli ...` 可直接使用内置 CLI。增强器版本来自上游 AssemblyVersion；JSON 同时返回源码构建号 `build`，CLI 协议版本为 `1`。
 
-安装助手采用现代 WPF 深色界面，固定显示作者 **A-FEI-** 与论坛 [bbs.gbtgame.me](https://bbs.gbtgame.me)。侧栏展示六个步骤，失败时展开日志并允许重试。
+安装助手直接复用 WandEnhancer 的颜色、按钮、勾选框和下拉框资源。与原增强器日志区一样，滚动条隐藏，保留滚轮滚动。状态区压缩为短进度条，主区域展示增强设置。作者 **A-FEI-** 与论坛 [bbs.gbtgame.me](https://bbs.gbtgame.me) 保留。
 
 ## 用户使用
 
@@ -12,7 +12,7 @@
 2. 备份当前用户的 Wand / WeMod Roaming 配置及相关 HKCU 注册表。
 3. 关闭默认安装目录内的进程，静默移除默认目录、相关快捷方式及已备份的注册表项。不会启动原版卸载器或客户端卸载事件，不需要点击卸载确认框。
 4. 静默安装固定版本 Wand 12.68.0，等待安装进程退出和文件写入稳定。
-5. 调用 CLI，以 Static 策略应用 Pro 和禁止更新，检查修改状态。
+5. 调用内置 CLI 应用界面选定的配置，并检查修改状态。默认 Static、Pro 和禁止更新；可选择 Supervised、F12 开发工具、远程访问、更新后自动应用和自定义 `.js` 脚本。
 6. 启动 Wand。可取消勾选“完成后启动 Wand”。
 
 开始前保存游戏进度。清理会退出原有登录状态。清理范围为当前用户 `%LOCALAPPDATA%\Wand`、`%LOCALAPPDATA%\WeMod` 和相应 Roaming 目录；不扫描清理系统注册表。遇到系统级安装、自定义安装位置或目录链接，会停止并说明原因，需先手动卸载。这是应用专用清理，不依赖 Geek，也不宣称覆盖 Geek 的全部扫描能力。
@@ -42,7 +42,15 @@ WandEnhancer.exe --cli launch --path "C:\Users\name\AppData\Local\Wand" --strate
 
 `--path` 接受 Squirrel 根目录、`app-*` 版本目录或 EXE；省略时调用已有安装检测。`--expected-version` 在任何修改前检查版本。`patch` 默认 `pro,disable-updates`，策略默认 `static`；可选补丁 `devtools,remote-panel`，可选策略 `supervised`。保持自动更新时用 `--patches pro --auto-apply`；它与 `disable-updates` 互斥。`launch` 对仅修改时未保存的 Supervised 配置，应明确传入 `--strategy supervised`。
 
-Static 启动后 CLI 立即退出，应用不会继承 JSON 输出管道；Supervised 模式需要持续监控，CLI 会一直运行到 Wand 退出。安装助手使用 Static 模式。
+上述命令中的 `WandEnhancer.exe` 均可直接替换成 `WandSetup.exe`，无需外置增强器。Static 启动后 CLI 立即退出；直接调用 CLI 的 Supervised 模式会监控到 Wand 退出。安装助手选择 Supervised 时，通过安装目录中的持久启动器运行，安装界面不会等待 Wand 退出。
+
+界面会避免同时启用“禁用更新”与“更新后自动应用”。添加脚本会启用远程访问；脚本在清理旧版前缓存，在修改前复制到安装根目录的 `WandEnhancerScripts`，供更新后重打使用。界面设置先做快照，再通过 `--config` JSON 传给内置 CLI，后续界面变化不会改动当前安装任务。
+
+```text
+WandSetup.exe --cli patch --path "C:\Users\name\AppData\Local\Wand" --config options.json
+```
+
+`--config` 使用原版 PatchConfig 结构：Strategy（Static=1、Supervised=0）、PatchTypes（Pro=1、禁止更新=2、F12=8、远程访问=16）、AutoApplyAfterUpdate、CustomScriptPaths。它与 `--patches`、`--strategy`、`--auto-apply` 互斥；脚本必须为现有 `.js` 文件，且需要远程访问选项。
 
 | 退出码 | 含义 |
 | --- | --- |
@@ -66,7 +74,7 @@ Static 启动后 CLI 立即退出，应用不会继承 JSON 输出管道；Super
 .\scripts\test-installer.ps1
 ```
 
-输出 `dist\Release\WandSetup.exe` 为完整单文件安装工具，另提供 `WandEnhancer.exe`、中文说明与 SHA256SUMS。省略 `-WandInstallerPath` 构建需外置原版安装包的轻量版。修改 `Fork/Installer/package.json` 的版本、文件名与 SHA256 可切换目标安装包；必须先验证其兼容性及静默行为，不能只改文件名。
+输出 `dist\Release\WandSetup.exe` 为完整单文件安装工具，交付目录不再放独立增强器 EXE，另附中文说明与 SHA256SUMS。独立开发者 CLI 仍可在 `WandEnhancer/bin/Release` 获取。省略 `-WandInstallerPath` 构建需外置原版安装包的轻量版，增强器始终内置。修改 `Fork/Installer/package.json` 的版本、文件名与 SHA256 可切换目标安装包；必须先验证兼容性及静默行为。
 
 `sync-upstream.yml` 继续定时合并上游。同步时保护 `Fork/` 和分支专用脚本与工作流，再通过 `reapply-fork.ps1` 补回 MSBuild 入口导入。上游原始 `Program.Main` 无需修改。同步构建后同时发布 CLI 和轻量安装助手。若上游接口出现不兼容，构建或测试会失败，不发布新安装助手。
 
@@ -80,7 +88,7 @@ Static 启动后 CLI 立即退出，应用不会继承 JSON 输出管道；Super
 
 ## 隔离验收与完整测试
 
-`test-installer.ps1` 检查 21 组安装编排、失败拦截、注册表快照、静默移除、快捷方式备份和目标识别、参数引号往返、独立 GUI 启动及窗口状态，另检查轻量版缺失／损坏载荷和进程互斥。静默移除回归用假 Update.exe 验证原卸载器不会被启动，并验证只读应用文件可清理、无关目录及同名无关快捷方式保留。窗口测试覆盖最小尺寸与 150% / 200% 渲染。
+`test-installer.ps1` 检查 23 组安装编排、失败拦截、参数快照、脚本缓存和持久化、配置传递、静默移除、快捷方式、独立启动及窗口状态；另验证单独 EXE 在空目录调用内置 CLI、轻量版缺失／损坏载荷和进程互斥。窗口测试检查共享调色板、隐藏滚动条、紧凑状态区、最小尺寸与 150% / 200% 渲染。
 
 `test-real-package.ps1 -BundleDirectory <原版 app 目录>` 只操作复制到临时目录的副本，覆盖 Static / Supervised 两种策略、四项补丁、JavaScript 和远程桥语法，以及恢复后的全部文件哈希。不要把专有解包文件提交到仓库。
 

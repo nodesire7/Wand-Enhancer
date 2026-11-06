@@ -11,6 +11,7 @@ namespace WandEnhancer.Fork.Installer
         [STAThread]
         public static int Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "--cli") return EmbeddedCli.Run(args);
             bool check = args.Length == 1 && args[0] == "--check";
             bool install = (args.Length == 1 || (args.Length == 2 && args[1] == "--no-launch")) && args[0] == "--install";
             if (check || install)

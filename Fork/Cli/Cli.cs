@@ -41,20 +41,20 @@ namespace WandEnhancer.Fork
                 for (int i = 2; i < args.Length; i++)
                 {
                     string name = args[i];
-                    if (!new[] { "--path", "--patches", "--strategy", "--expected-version", "--auto-apply" }.Contains(name) || options.ContainsKey(name))
+                    if (!new[] { "--path", "--patches", "--strategy", "--expected-version", "--auto-apply", "--config" }.Contains(name) || options.ContainsKey(name))
                         return Reply(2, command, "Unknown or duplicate option: " + name, null, logs);
                     if (name == "--auto-apply") options.Add(name, "true");
                     else if (++i < args.Length && !args[i].StartsWith("--")) options.Add(name, args[i]);
                     else return Reply(2, command, "Missing value for " + name, null, logs);
                 }
-                if (options.Keys.Any(k => (command != "patch" && (k == "--patches" || k == "--auto-apply")) ||
+                if (options.Keys.Any(k => (command != "patch" && (k == "--patches" || k == "--auto-apply" || k == "--config")) ||
                     (command != "patch" && command != "launch" && k == "--strategy") ||
                     ((command == "help" || command == "version") && options.Count > 0)))
                     return Reply(2, command, "Option does not apply to this command.", null, logs);
 
                 if (command == "help") return Reply(0, command, "Headless CLI; every response is one JSON object.", new {
                     commands = new[] { "version", "status", "patch", "restore", "launch" },
-                    options = "--path <install root|app folder|exe> --expected-version <version>; patch: --patches pro,disable-updates,devtools,remote-panel --strategy static|supervised --auto-apply; launch: --strategy static|supervised",
+                    options = "--path <install root|app folder|exe> --expected-version <version>; patch: --config <PatchConfig.json> OR --patches pro,disable-updates,devtools,remote-panel --strategy static|supervised --auto-apply; launch: --strategy static|supervised",
                     exitCodes = "0 success; 2 invalid arguments; 3 no install; 4 version mismatch; 5 operation failed; 6 busy"
                 }, logs);
                 if (command == "version") return Reply(0, command, "WandEnhancer CLI", new { cliVersion = 1 }, logs);
@@ -67,6 +67,20 @@ namespace WandEnhancer.Fork
                 }
                 if (command == "patch")
                 {
+                    if (options.TryGetValue("--config", out string configPath))
+                    {
+                        if (options.ContainsKey("--patches") || options.ContainsKey("--strategy") || options.ContainsKey("--auto-apply"))
+                            return Reply(2, command, "--config cannot be combined with patch selection options.", null, logs);
+                        try
+                        {
+                            patchConfig = JsonConvert.DeserializeObject<PatchConfig>(File.ReadAllText(configPath));
+                            PatchConfigs.Validate(patchConfig);
+                        }
+                        catch (Exception error) when (error is IOException || error is UnauthorizedAccessException || error is JsonException || error is ArgumentException)
+                        { return Reply(2, command, error.Message, null, logs); }
+                    }
+                    else
+                    {
                     string selection = options.TryGetValue("--patches", out string requested) ? requested : "pro,disable-updates";
                     var patches = new Dictionary<string, EPatchType> { { "pro", EPatchType.ActivatePro }, { "disable-updates", EPatchType.DisableUpdates }, { "devtools", EPatchType.DevToolsOnF12 }, { "remote-panel", EPatchType.RemoteWebPanelPreview } };
                     foreach (string name in selection.Split(','))
@@ -77,6 +91,7 @@ namespace WandEnhancer.Fork
                     patchConfig.AutoApplyAfterUpdate = options.ContainsKey("--auto-apply");
                     if (patchConfig.AutoApplyAfterUpdate && patchConfig.PatchTypes.Contains(EPatchType.DisableUpdates))
                         return Reply(2, command, "Choose either disable-updates or --auto-apply.", null, logs);
+                    }
                 }
 
                 WeModConfig install;

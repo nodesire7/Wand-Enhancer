@@ -44,6 +44,22 @@ try {
     [void](Invoke-Cli @('restore', '--path', $scratch, '--auto-apply') 2)
     [void](Invoke-Cli @('version', '--path', $scratch) 2)
     [void](Invoke-Cli @('status', '--path', $scratch, '--unknown') 2)
+    $configFile = Join-Path $scratch '参数 config.json'
+    $scriptFile = Join-Path $scratch '自定义.js'
+    [IO.File]::WriteAllText($scriptFile, 'globalThis.fixture = true;')
+    $custom = @{ Strategy = 0; PatchTypes = @(1,8,16); AutoApplyAfterUpdate = $true; CustomScriptPaths = @($scriptFile) }
+    [IO.File]::WriteAllText($configFile, ($custom | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+    [void](Invoke-Cli @('patch', '--path', (Join-Path $scratch 'missing'), '--config', $configFile) 3)
+    [void](Invoke-Cli @('patch', '--path', $scratch, '--config', $configFile, '--strategy', 'static') 2)
+    [IO.File]::WriteAllText($configFile, '{"Strategy":1,"PatchTypes":[],"CustomScriptPaths":[]}')
+    [void](Invoke-Cli @('patch', '--path', $scratch, '--config', $configFile) 2)
+    [IO.File]::WriteAllText($configFile, '{"Strategy":99,"PatchTypes":[1]}')
+    [void](Invoke-Cli @('patch', '--path', $scratch, '--config', $configFile) 2)
+    [IO.File]::WriteAllText($configFile, '{"Strategy":1,"PatchTypes":[1024]}')
+    [void](Invoke-Cli @('patch', '--path', $scratch, '--config', $configFile) 2)
+    [void](Invoke-Cli @('restore', '--path', $scratch, '--config', $configFile) 2)
+    [IO.File]::WriteAllText($configFile, '{not-json}')
+    [void](Invoke-Cli @('patch', '--path', $scratch, '--config', $configFile) 2)
 
     $install = Join-Path $scratch '中文 路径\app-12.68.0'
     $resources = Join-Path $install 'resources'

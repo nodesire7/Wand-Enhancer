@@ -53,4 +53,24 @@ $mutex = [Threading.Mutex]::new($true, 'Local\GBTGAME.WandSetup')
 try { $busy = Invoke-Check $assembly 6; if ($busy.success) { throw 'Busy installer accepted a second operation.' } }
 finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
 Write-Host 'PASS installer process mutex and JSON error responses'
+$proxy = [Diagnostics.Process]::new()
+$proxyDirectory = Join-Path $OutputDirectory ('standalone-' + [guid]::NewGuid().ToString('N'))
+[IO.Directory]::CreateDirectory($proxyDirectory) | Out-Null
+$proxyExe = Join-Path $proxyDirectory 'WandSetup.exe'
+Copy-Item -LiteralPath $assembly -Destination $proxyExe
+$proxy.StartInfo = [Diagnostics.ProcessStartInfo]::new($proxyExe, '--cli version')
+$proxy.StartInfo.WorkingDirectory = $proxyDirectory
+$proxy.StartInfo.UseShellExecute = $false
+$proxy.StartInfo.CreateNoWindow = $true
+$proxy.StartInfo.RedirectStandardOutput = $true
+$proxy.StartInfo.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+try {
+    [void]$proxy.Start()
+    $output = $proxy.StandardOutput.ReadToEndAsync()
+    if (-not $proxy.WaitForExit(20000)) { $proxy.Kill(); throw 'Embedded CLI proxy timed out.' }
+    if (-not $output.Wait(5000)) { throw 'Embedded CLI output remained open.' }
+    $reply = $output.Result | ConvertFrom-Json
+    if ($proxy.ExitCode -ne 0 -or -not $reply.success -or $reply.data.cliVersion -ne 1) { throw 'Single EXE CLI proxy failed.' }
+    Write-Host 'PASS standalone setup calls its embedded CLI without an adjacent enhancer EXE'
+} finally { $proxy.Dispose() }
 Write-Host "Installer test report and state captures: $OutputDirectory"

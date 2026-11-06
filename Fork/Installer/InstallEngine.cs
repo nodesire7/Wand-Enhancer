@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
+using WandEnhancer.Models;
 
 namespace WandEnhancer.Fork.Installer
 {
@@ -29,6 +30,8 @@ namespace WandEnhancer.Fork.Installer
         private readonly string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         private readonly string scratch;
         private readonly Package package;
+        private readonly PatchConfig selectedConfig;
+        private PatchConfig preparedConfig;
         private string enhancer;
         private string setup;
         private string backup;
@@ -37,12 +40,13 @@ namespace WandEnhancer.Fork.Installer
         public string BackupPath => backup;
         public string LogPath => logFile;
 
-        public InstallEngine(Action<int, string> report)
+        public InstallEngine(Action<int, string> report, PatchConfig config = null)
         {
             this.report = report;
             scratch = Path.Combine(Path.GetTempPath(), "GBTGAME-Wand-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(scratch);
             package = LoadPackage();
+            selectedConfig = PatchConfigs.Copy(config ?? PatchConfigs.Default());
         }
 
         internal static Package LoadPackage()
@@ -61,6 +65,8 @@ namespace WandEnhancer.Fork.Installer
 
         public void Preflight()
         {
+            PatchConfigs.Validate(selectedConfig);
+            preparedConfig = PatchScriptStore.Copy(selectedConfig, Path.Combine(scratch, "selected-scripts"));
             Report(0, "校验安装包与内置 CLI…");
             if (Path.GetFileName(package.fileName) != package.fileName || package.arguments != "--silent" ||
                 !Version.TryParse(package.version, out Version ignored)) throw new InvalidDataException("安装清单无效。");
@@ -123,8 +129,13 @@ namespace WandEnhancer.Fork.Installer
         void IInstallSteps.Patch()
         {
             string root = Path.Combine(local, "Wand");
+            // Keep scripts outside app-* so saved auto-apply configurations survive both
+            // this temporary extraction directory and later Squirrel version replacements.
+            preparedConfig = PatchScriptStore.Copy(preparedConfig, Path.Combine(root, "WandEnhancerScripts"));
+            string configFile = Path.Combine(scratch, "patch-config.json");
+            File.WriteAllText(configFile, Json.Serialize(preparedConfig));
             Cli("patch", "--path", root, "--expected-version", package.version,
-                "--patches", "pro,disable-updates", "--strategy", "static");
+                "--config", configFile);
         }
 
         bool IInstallSteps.Verify()
@@ -135,7 +146,20 @@ namespace WandEnhancer.Fork.Installer
             return data != null && Convert.ToBoolean(data["patched"]);
         }
 
-        void IInstallSteps.Launch() => Cli("launch", "--path", Path.Combine(local, "Wand"), "--expected-version", package.version, "--strategy", "static");
+        void IInstallSteps.Launch()
+        {
+            string root = Path.Combine(local, "Wand");
+            if (selectedConfig.Strategy == EPatchStrategy.Static)
+                Cli("launch", "--path", root, "--expected-version", package.version, "--strategy", "static");
+            else
+            {
+                // The deployed launcher owns the long-running supervisor. The installer's
+                // short-lived CLI must not wait for Wand to exit or own its temporary image.
+                string launcher = Path.Combine(root, "Wand.exe");
+                if (!File.Exists(launcher)) throw new FileNotFoundException("未找到 Supervised 启动器。", launcher);
+                Process.Start(new ProcessStartInfo(launcher) { UseShellExecute = true, WorkingDirectory = root })?.Dispose();
+            }
+        }
 
         private void ValidateKnownPaths()
         {

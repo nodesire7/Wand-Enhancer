@@ -156,5 +156,5 @@ jobs:
             gh release create $tag --title $branding.product --notes-file $notes --latest --target master
           }
 
-          gh release upload $tag 'dist/Release/WandEnhancer.exe' 'dist/Release/WandEnhancer.exe.sha256' 'dist/Release/WandSetup.exe' 'dist/Release/SHA256SUMS.txt' 'dist/Release/使用说明.txt' --clobber
+          gh release upload $tag 'WandEnhancer/bin/Release/WandEnhancer.exe' 'WandEnhancer/bin/Release/WandEnhancer.exe.sha256' 'dist/Release/WandSetup.exe' 'dist/Release/SHA256SUMS.txt' 'dist/Release/使用说明.txt' --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }

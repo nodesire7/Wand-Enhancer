@@ -18,6 +18,8 @@ Detect and uninstall existing Wand/WeMod, clean its known per-user remnants, ins
 
 Preserve the fork's upstream synchronization and GBTGAME branding. Reuse the existing patch pipeline. Check payloads before changing an installation. Back up settings and affected registry entries. Automated tests use temporary fixtures and never the developer's installed Wand.
 
+Deliver one standalone WandSetup.exe with an embedded enhancer. Expose the enhancer's strategy, patch flags, auto-apply and custom scripts in the installer, using its existing visual styles. Keep the ready/status region compact.
+
 ## Brand Commitments
 
 The user confirmed GBTGAME branding, simplified Chinese, a modern practical interface, author A-FEI-, and forum address bbs.gbtgame.me.

@@ -23,9 +23,12 @@
     <Reference Include="System.Xaml" />
     <Reference Include="System.Web.Extensions" />
     <Compile Include="*.cs" />
-    <Compile Include="..\Shared\Arguments.cs" />
+    <Compile Include="..\Shared\*.cs" />
+    <Compile Include="..\..\WandEnhancer\Models\PatchConfig.cs" />
     <Compile Include="..\..\WandEnhancer\Branding\BrandingInfo.g.cs" />
     <Page Include="InstallerWindow.xaml"><Generator>MSBuild:Compile</Generator></Page>
+    <Page Include="..\..\WandEnhancer\Style\ColorScheme.xaml"><Link>Style\ColorScheme.xaml</Link></Page>
+    <Page Include="..\..\WandEnhancer\Style\Styles.xaml"><Link>Style\Styles.xaml</Link></Page>
     <Resource Include="..\..\assets\appicon.ico"><Link>Assets\appicon.ico</Link></Resource>
     <Compile Include="obj\$(Configuration)\AssemblyInfo.cs" />
     <EmbeddedResource Include="package.json"><LogicalName>WandPackage</LogicalName></EmbeddedResource>
