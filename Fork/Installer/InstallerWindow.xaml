@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:models="clr-namespace:WandEnhancer.Models"
         xmlns:local="clr-namespace:WandEnhancer.Fork.Installer"
-        Title="GBTGAME · Wand 安装助手" Width="900" Height="760" MinWidth="820" MinHeight="680"
+        Title="GBTGAME · Wand 安装助手" Width="900" Height="860" MinWidth="900" MinHeight="860"
         WindowStartupLocation="CenterScreen" Background="{DynamicResource Background}" Foreground="{DynamicResource Foreground}"
         FontFamily="Microsoft YaHei UI" FontSize="13" Icon="Assets/appicon.ico"
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
@@ -57,7 +57,7 @@
             <Style x:Key="BackupListStyle" TargetType="ListBox">
                 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBox">
                     <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3">
-                        <ScrollViewer x:Name="PART_ScrollViewer" Background="Transparent" Focusable="False" Padding="2" CanContentScroll="True" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden"><ItemsPresenter /></ScrollViewer>
+                        <ScrollViewer x:Name="PART_ScrollViewer" Background="Transparent" Focusable="False" Padding="2" CanContentScroll="True" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled"><ItemsPresenter /></ScrollViewer>
                     </Border>
                 </ControlTemplate></Setter.Value></Setter>
             </Style>
@@ -65,13 +65,13 @@
                 <Setter Property="Foreground" Value="{DynamicResource Foreground}" />
                 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Expander">
                     <Grid ClipToBounds="True">
-                        <Grid.RowDefinitions><RowDefinition Height="36" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="40" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                         <ToggleButton x:Name="HeaderToggle" Content="{TemplateBinding Header}" FocusVisualStyle="{StaticResource KeyboardFocus}" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" Foreground="{TemplateBinding Foreground}" HorizontalContentAlignment="Left" Cursor="Hand">
-                            <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border x:Name="HeaderBorder" Background="Transparent" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="1,0">
+                            <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border x:Name="HeaderBorder" Background="Transparent" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="12,0">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Path x:Name="Arrow" Data="M 1,1 L 5,5 L 9,1" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5" Width="10" Height="6" Margin="0,0,9,0" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5"><Path.RenderTransform><RotateTransform /></Path.RenderTransform></Path><ContentPresenter /></StackPanel>
                             </Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource Muted}" /></Trigger></ControlTemplate.Triggers></ControlTemplate></ToggleButton.Template>
                         </ToggleButton>
-                        <ContentPresenter x:Name="Body" Grid.Row="1" ContentSource="Content" />
+                        <Border x:Name="Body" Grid.Row="1" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="3" Padding="12" Margin="0,3,0,4"><ContentPresenter ContentSource="Content" /></Border>
                     </Grid>
                 </ControlTemplate></Setter.Value></Setter>
             </Style>
@@ -113,14 +113,13 @@
                 </StackPanel>
             </Border>
             <local:AccordionGrid Grid.Row="2" x:Name="ContentSections" ClipToBounds="True">
-                <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="36" /><RowDefinition Height="36" /></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="40" /><RowDefinition Height="40" /></Grid.RowDefinitions>
                 <Expander x:Name="OptionsExpander" Header="安装选项" IsExpanded="True">
-                <ScrollViewer x:Name="SettingsScroll" Focusable="False" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False">
-                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="3" Padding="14" x:Name="OptionsEditor" DataContext="{Binding Options}">
+                <ScrollViewer x:Name="SettingsScroll" Focusable="False" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False">
+                    <Border Padding="0" x:Name="OptionsEditor" DataContext="{Binding Options}">
                         <StackPanel>
-                            <TextBlock Text="我们要增强什么？" FontWeight="SemiBold" Margin="0,0,0,13" />
                             <Grid Margin="0,0,0,9"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="200" /></Grid.ColumnDefinitions><TextBlock Text="补丁方式" VerticalAlignment="Center" /><ComboBox x:Name="StrategyBox" Style="{StaticResource InstallerCombo}" Grid.Column="1" SelectedValuePath="Tag" SelectedValue="{Binding Strategy, Mode=TwoWay}" AutomationProperties.Name="补丁方式" ToolTip="Static 修改磁盘文件；Supervised 在每次启动时于内存中应用修改。"><ComboBoxItem Tag="{x:Static models:EPatchStrategy.Static}" Content="Static (推荐)" /><ComboBoxItem Tag="{x:Static models:EPatchStrategy.Supervised}" Content="Supervised" /></ComboBox></Grid>
-                            <Grid><Grid.RowDefinitions><RowDefinition Height="28" /><RowDefinition Height="28" /><RowDefinition Height="28" /><RowDefinition Height="28" /><RowDefinition Height="28" /></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="28" /></Grid.ColumnDefinitions>
+                            <Grid><Grid.RowDefinitions><RowDefinition Height="26" /><RowDefinition Height="26" /><RowDefinition Height="26" /><RowDefinition Height="26" /><RowDefinition Height="26" /></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="28" /></Grid.ColumnDefinitions>
                                 <TextBlock Text="激活 WeMod Pro" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox x:Name="ActivateProBox" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding ActivatePro, Mode=TwoWay}" AutomationProperties.Name="激活 WeMod Pro" />
                                 <TextBlock Grid.Row="1" Text="按 F12 打开开发者工具" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox x:Name="DevToolsBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding DevTools, Mode=TwoWay}" AutomationProperties.Name="按 F12 打开开发者工具" />
                                 <TextBlock Grid.Row="2" Text="禁用更新" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" /><CheckBox x:Name="DisableUpdatesBox" Grid.Row="2" Grid.Column="1" Style="{StaticResource OptionCheck}" IsChecked="{Binding DisableUpdates, Mode=TwoWay}" AutomationProperties.Name="禁用更新" ToolTip="启用后不检查 Wand 更新，同时关闭更新后自动应用。" />
@@ -130,7 +129,8 @@
                             <Border Margin="0,12,0,0" Padding="10" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="3" Background="{DynamicResource Muted}">
                                 <StackPanel><DockPanel LastChildFill="False"><TextBlock Text="自定义脚本" VerticalAlignment="Center" /><Button x:Name="AddScriptButton" DockPanel.Dock="Right" Content="添加 .js" Click="AddScriptClick" Style="{StaticResource InstallerButton}" /></DockPanel>
                                     <TextBlock Text="选中的 .js 文件会打包到 Wand 并在渲染器中加载。" FontSize="11" Foreground="{DynamicResource MutedForeground}" TextWrapping="Wrap" Margin="0,7,0,4" />
-                                    <ScrollViewer x:Name="ScriptScroll" Focusable="False" MaxHeight="82" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled"><ItemsControl x:Name="ScriptList" ItemsSource="{Binding Scripts}"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,4,0,0" LastChildFill="True"><Button DockPanel.Dock="Right" Tag="{Binding}" Content="移除" AutomationProperties.Name="{Binding FileName, StringFormat=移除脚本 {0}}" Click="RemoveScriptClick" Style="{StaticResource InstallerButton}" Padding="7,2" FontSize="11" /><TextBlock Text="{Binding FileName}" ToolTip="{Binding FullPath}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource MutedForeground}" /></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
+                                    <ScrollViewer x:Name="ScriptScroll" Focusable="False" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"><ItemsControl x:Name="ScriptList" ItemsSource="{Binding VisibleScripts}"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,4,0,0" LastChildFill="True"><Button DockPanel.Dock="Right" Tag="{Binding}" Content="移除" AutomationProperties.Name="{Binding FileName, StringFormat=移除脚本 {0}}" Click="RemoveScriptClick" Style="{StaticResource InstallerButton}" Padding="7,2" FontSize="11" /><TextBlock Text="{Binding FileName}" ToolTip="{Binding FullPath}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource MutedForeground}" /></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
+                                    <DockPanel Margin="0,6,0,0" LastChildFill="False"><TextBlock Text="{Binding ScriptPageLabel}" Foreground="{DynamicResource MutedForeground}" FontSize="11" VerticalAlignment="Center" /><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="PreviousScripts" Content="上一页" IsEnabled="{Binding PreviousScripts}" Click="PreviousScriptsClick" Style="{StaticResource InstallerButton}" Padding="7,2" FontSize="11" Margin="8,0,0,0" /><Button x:Name="NextScripts" Content="下一页" IsEnabled="{Binding NextScripts}" Click="NextScriptsClick" Style="{StaticResource InstallerButton}" Padding="7,2" FontSize="11" Margin="8,0,0,0" /></StackPanel></DockPanel>
                                     <TextBlock x:Name="NoScriptsText" Text="未选择脚本" FontSize="11" Foreground="{DynamicResource MutedForeground}"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding HasScripts}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
                                 </StackPanel>
                             </Border>
@@ -138,29 +138,34 @@
                     </Border>
                 </ScrollViewer>
                 </Expander>
-                <Expander Grid.Row="1" x:Name="LogExpander" Header="本次执行记录" Foreground="{DynamicResource MutedForeground}" FontSize="12">
-                    <TextBox x:Name="Details" Margin="0,7,0,5" Padding="10" Background="{DynamicResource Muted}" Foreground="{DynamicResource MutedForeground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="安装日志" />
+                <Expander Grid.Row="1" x:Name="LogExpander" Header="本次执行记录">
+                    <Grid><Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                        <TextBox x:Name="Details" Padding="9" Background="{DynamicResource Muted}" Foreground="{DynamicResource MutedForeground}" BorderThickness="0" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="安装日志" />
+                        <DockPanel Grid.Row="1" Margin="0,8,0,0" LastChildFill="False"><TextBlock x:Name="LogPageLabel" Text="1 / 1" Foreground="{DynamicResource MutedForeground}" VerticalAlignment="Center" /><Button x:Name="PreviousLog" Content="上一页" Click="PreviousLogClick" Style="{StaticResource InstallerButton}" Margin="12,0,0,0" /><Button x:Name="NextLog" Content="下一页" Click="NextLogClick" Style="{StaticResource InstallerButton}" Margin="8,0,0,0" /></DockPanel>
+                    </Grid>
                 </Expander>
                 <Expander Grid.Row="2" x:Name="BackupsExpander" Header="配置备份" Foreground="{DynamicResource Foreground}">
-                    <Grid x:Name="BackupsPanel" Margin="0,8,0,0">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Grid x:Name="BackupsPanel">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="110" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                         <StackPanel>
-                            <DockPanel><Button x:Name="OpenBackupRoot" DockPanel.Dock="Right" Content="打开目录" Style="{StaticResource InstallerButton}" Click="OpenBackupRootClick" Margin="8,0,0,0" /><TextBox x:Name="BackupRootText" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource MutedForeground}" FontSize="10.5" VerticalAlignment="Center" Padding="0" AutomationProperties.Name="备份保存位置" /></DockPanel>
+                            <DockPanel><Button x:Name="OpenBackupRoot" DockPanel.Dock="Right" Content="打开目录" Style="{StaticResource InstallerButton}" Click="OpenBackupRootClick" Margin="8,0,0,0" /><TextBox x:Name="BackupRootText" TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource MutedForeground}" FontSize="10.5" VerticalAlignment="Center" Padding="0" AutomationProperties.Name="备份保存位置" /></DockPanel>
                             <TextBlock Text="恢复 Roaming 与注册表中的用户配置；恢复前自动保存当前配置。" Foreground="{DynamicResource MutedForeground}" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,9" />
                         </StackPanel>
                         <Grid Grid.Row="1">
-                            <ListBox x:Name="BackupList" Style="{StaticResource BackupListStyle}" SelectionChanged="BackupSelectionChanged" Background="{DynamicResource Muted}" Foreground="{DynamicResource Foreground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ScrollViewer.VerticalScrollBarVisibility="Hidden" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" AutomationProperties.Name="配置备份列表">
+                            <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <ListBox x:Name="BackupList" Style="{StaticResource BackupListStyle}" SelectionChanged="BackupSelectionChanged" Background="{DynamicResource Muted}" Foreground="{DynamicResource Foreground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" AutomationProperties.Name="配置备份列表">
                                 <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border x:Name="ItemBorder" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="3"><ContentPresenter /></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource Secondary}" /><Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource Border}" /></Trigger><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource Ring}" /></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style></ListBox.ItemContainerStyle>
-                                <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="6,7"><TextBlock Text="{Binding Label}" /><TextBlock Text="{Binding Summary}" Foreground="{DynamicResource MutedForeground}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" /></StackPanel></DataTemplate></ListBox.ItemTemplate>
+                                <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="6,5"><TextBlock Text="{Binding Label}" TextWrapping="Wrap" /><TextBlock Text="{Binding Summary}" Foreground="{DynamicResource MutedForeground}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" /></StackPanel></DataTemplate></ListBox.ItemTemplate>
                             </ListBox>
+                            <DockPanel Grid.Row="1" Margin="0,6,0,0" LastChildFill="False"><TextBlock x:Name="BackupPageLabel" Text="1 / 1" Foreground="{DynamicResource MutedForeground}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="PreviousBackups" Content="上一页" Click="PreviousBackupsClick" Style="{StaticResource InstallerButton}" Padding="7,2" FontSize="11" Margin="12,0,0,0" /><Button x:Name="NextBackups" Content="下一页" Click="NextBackupsClick" Style="{StaticResource InstallerButton}" Padding="7,2" FontSize="11" Margin="8,0,0,0" /></DockPanel>
                             <TextBlock x:Name="EmptyBackups" Text="还没有配置备份。安装时会自动创建。" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource MutedForeground}" FontSize="11" IsHitTestVisible="False" />
                         </Grid>
                         <StackPanel Grid.Row="2" Margin="0,8,0,0">
-                            <TextBox x:Name="SelectedBackupPath" IsReadOnly="True" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource MutedForeground}" Padding="0" FontSize="10.5" AutomationProperties.Name="所选备份完整路径" />
+                            <TextBox x:Name="SelectedBackupPath" TextWrapping="Wrap" IsReadOnly="True" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource MutedForeground}" Padding="0" FontSize="10.5" AutomationProperties.Name="所选备份完整路径" />
                             <WrapPanel Margin="0,7,0,0"><Button x:Name="RestoreBackup" Content="恢复配置" Click="RestoreBackupClick" Style="{StaticResource InstallerButton}" Margin="0,0,7,0" /><Button x:Name="DeleteBackup" Content="删除备份" Click="DeleteBackupClick" Style="{StaticResource InstallerButton}" Margin="0,0,7,0" /><Button x:Name="OpenBackupFolder" Content="打开所选备份" Click="OpenBackupFolderClick" Style="{StaticResource InstallerButton}" Margin="0,0,7,0" /><Button x:Name="RefreshBackups" Content="刷新" Click="RefreshBackupsClick" Style="{StaticResource InstallerButton}" /></WrapPanel>
                         </StackPanel>
                         <StackPanel Grid.Row="3" Margin="0,8,0,0">
-                            <TextBlock x:Name="BackupFeedback" MaxHeight="48" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" Foreground="{DynamicResource MutedForeground}" FontSize="11" AutomationProperties.LiveSetting="Polite" />
+                            <TextBlock x:Name="BackupFeedback" TextWrapping="Wrap" Foreground="{DynamicResource MutedForeground}" FontSize="11" AutomationProperties.LiveSetting="Polite" />
 
                         </StackPanel>
                             <Border x:Name="BackupConfirmation" Grid.Row="1" Grid.RowSpan="3" VerticalAlignment="Center" Background="{DynamicResource Muted}" Visibility="Collapsed" BorderBrush="{DynamicResource Border}" BorderThickness="1" Padding="10" Margin="0,8,0,0"><StackPanel><TextBlock x:Name="BackupConfirmationText" TextWrapping="Wrap" FontSize="11" /><StackPanel Orientation="Horizontal" Margin="0,9,0,0"><Button x:Name="ConfirmBackup" Content="确认" Click="ConfirmBackupClick" Style="{StaticResource InstallerButton}" Margin="0,0,8,0" /><Button x:Name="CancelBackup" Content="取消" Click="CancelBackupClick" Style="{StaticResource InstallerButton}" /></StackPanel></StackPanel></Border>

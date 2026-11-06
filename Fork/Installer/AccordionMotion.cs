@@ -21,28 +21,35 @@ namespace WandEnhancer.Fork.Installer
 
     internal sealed class AccordionMotion
     {
-        private const double HeaderHeight = 36;
+        internal const double HeaderHeight = 40;
         private readonly Grid host;
         private readonly Expander[] sections;
         private bool changing;
+        private Expander active;
         internal AccordionMotion(Grid host, params Expander[] sections)
         {
             this.host = host; this.sections = sections;
+            active = sections.FirstOrDefault(section => section.IsExpanded) ?? sections.First();
             foreach (var section in sections)
             {
                 section.Expanded += Changed; section.Collapsed += Changed;
             }
             host.SizeChanged += (sender, args) => Layout(false);
-            host.Loaded += (sender, args) => Layout(false);
+            host.Loaded += (sender, args) => Select(active, false);
         }
         private void Changed(object sender, RoutedEventArgs args)
         {
             if (changing || !ReferenceEquals(sender, args.OriginalSource)) return;
-            changing = true;
             var selected = (Expander)sender;
-            if (selected.IsExpanded) foreach (var other in sections.Where(item => item != selected)) other.IsExpanded = false;
+            Select(selected.IsExpanded ? selected : active, SystemParameters.ClientAreaAnimation && InputManager.Current.MostRecentInputDevice is MouseDevice);
+        }
+        private void Select(Expander selected, bool animate)
+        {
+            changing = true;
+            active = selected;
+            foreach (var section in sections) section.SetCurrentValue(Expander.IsExpandedProperty, section == active);
             changing = false;
-            Layout(SystemParameters.ClientAreaAnimation && InputManager.Current.MostRecentInputDevice is MouseDevice);
+            Layout(animate);
         }
         internal void Layout(bool animate)
         {

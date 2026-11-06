@@ -25,3 +25,5 @@ Deliver one standalone WandSetup.exe with an embedded enhancer. Expose the enhan
 The user confirmed GBTGAME branding, simplified Chinese, a modern practical interface, author A-FEI-, and forum address bbs.gbtgame.me.
 
 Make saved configuration backups discoverable across restarts, allow recovery and deletion, and preserve a recovery point before replacing current settings. Sections fold instead of scrolling the status out of view.
+
+Use one selected accordion section at a time, identical header/body dimensions, and complete visible pages without scrolling. Page through scripts, backups and log history without dropping data.

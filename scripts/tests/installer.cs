@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Navigation;
 using System.Windows.Threading;
 using System.Threading;
+using System.Text;
 using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -346,33 +347,33 @@ internal static class InstallerTests
                 Equal(((TextBlock)window.FindName("AuthorText")).Text, "作者  A-FEI-");
                 Equal(((Run)window.FindName("ForumText")).Text, "bbs.gbtgame.me");
                 Equal(((Hyperlink)window.FindName("ForumLink")).NavigateUri.AbsoluteUri, "https://bbs.gbtgame.me/");
-                Check(((ScrollViewer)window.FindName("SettingsScroll")).VerticalScrollBarVisibility == ScrollBarVisibility.Hidden, "Scroll behavior differs from enhancer");
+                Check(((ScrollViewer)window.FindName("SettingsScroll")).VerticalScrollBarVisibility == ScrollBarVisibility.Disabled, "Settings should not scroll");
                 var originalPalette = new ResourceDictionary { Source = new Uri("/WandSetup;component/Style/ColorScheme.xaml", UriKind.Relative) };
                 Equal(((SolidColorBrush)window.FindResource("Background")).Color, ((SolidColorBrush)originalPalette["Background"]).Color);
-                Capture(window, "ready", 900, 760, 96);
+                Capture(window, "ready", 900, 860, 96);
                 Test("button hover preserves geometry and disabled/pressed styles", () => TestButtonStates(window));
                 model.Begin(); model.Report(3, "正在安装 Wand 12.68.0…"); window.UpdateLayout();
                 Check(!((Button)window.FindName("InstallButton")).IsEnabled, "Busy install button enabled");
                 Check(!((CheckBox)window.FindName("Launch")).IsEnabled, "Busy launch checkbox enabled");
                 window.Close(); Check(window.IsVisible, "Busy window closed");
-                Capture(window, "busy", 960, 720, 96);
+                Capture(window, "busy", 960, 860, 96);
                 model.Fail("测试错误：无法写入目标目录。请检查磁盘空间和文件权限，查看日志后重试。\n" + new string('路', 400));
                 Check(((Button)window.FindName("InstallButton")).IsEnabled, "Retry unavailable");
                 ((Expander)window.FindName("LogExpander")).IsExpanded = true;
-                Capture(window, "error-minimum", 820, 680, 96);
+                Capture(window, "error-minimum", 900, 860, 96);
                 model.Begin(); model.Succeed(true);
                 ((Expander)window.FindName("LogExpander")).IsExpanded = false;
-                Capture(window, "success", 960, 720, 96);
-                Capture(window, "dpi-125", 900, 760, 120);
-                Capture(window, "dpi-150", 900, 760, 144);
-                Capture(window, "dpi-200", 960, 720, 192);
+                Capture(window, "success", 960, 860, 96);
+                Capture(window, "dpi-125", 900, 860, 120);
+                Capture(window, "dpi-150", 900, 860, 144);
+                Capture(window, "dpi-200", 960, 860, 192);
             }
             finally { window.Close(); }
             Test("all option controls bind, update choices exclude each other, keyboard focus is visible", TestOptionControls);
             Test("script dialog cancel, multiple, duplicate, invalid, failure and remove buttons", TestScriptControls);
             Test("install, busy guard, log, backup, forum, failure, retry and finish buttons", TestWorkflowControls);
             Test("invalid options never create a session and logging errors never crash recovery", TestRecoveryControls);
-            Test("long scripts, scrolling and minimum/maximized layouts keep actions reachable", TestLongContent);
+            Test("all script, log and backup pages remain complete without scrolling", TestLongContent);
             Test("backup management buttons, confirmation, busy guard and failures", TestBackupControls);
             Test("accordion replaces sections without pushing status, and reverses animation", TestAccordion);
         }
@@ -491,7 +492,7 @@ internal static class InstallerTests
             foreach (var section in new[] { "OptionsExpander", "LogExpander", "BackupsExpander" })
             {
                 var control = Control<Expander>(window, section);
-                double height = control.IsExpanded ? Math.Max(36, host.ActualHeight - 72) : 36;
+                double height = control.IsExpanded ? Math.Max(40, host.ActualHeight - 80) : 40;
                 if (Math.Abs(control.ActualHeight - height) > 1) return false;
             }
             return true;
@@ -503,16 +504,28 @@ internal static class InstallerTests
         var window = new InstallerWindow(new FakeInteraction(), new FakeBackups()); window.Show();
         try
         {
-            Capture(window, "accordion-options", 820, 680, 96);
+            Capture(window, "accordion-options", 900, 860, 96);
             var status = Control<Border>(window, "StatusPanel");
             var original = status.TranslatePoint(new Point(), window);
             Control<Expander>(window, "LogExpander").IsExpanded = true;
-            Capture(window, "accordion-log", 820, 680, 96);
+            Capture(window, "accordion-log", 900, 860, 96);
             Check(!Control<Expander>(window, "OptionsExpander").IsExpanded, "Options did not fold");
             Equal(status.TranslatePoint(new Point(), window), original);
             Control<Expander>(window, "BackupsExpander").IsExpanded = true;
-            Capture(window, "accordion-backups", 820, 680, 96);
+            Capture(window, "accordion-backups", 900, 860, 96);
             Check(!Control<Expander>(window, "LogExpander").IsExpanded, "Log did not fold");
+            double expandedHeight = Control<Expander>(window, "BackupsExpander").ActualHeight;
+            foreach (string name in new[] { "OptionsExpander", "LogExpander", "BackupsExpander", "OptionsExpander", "LogExpander", "BackupsExpander" })
+            {
+                var chosen = Control<Expander>(window, name); chosen.ApplyTemplate();
+                Click((ToggleButton)chosen.Template.FindName("HeaderToggle", chosen));
+                SettleSections(window);
+                Equal(new[] { "OptionsExpander", "LogExpander", "BackupsExpander" }.Count(item => Control<Expander>(window, item).IsExpanded), 1);
+                Check(chosen.IsExpanded, "Clicked header did not select its section");
+                Equal(chosen.ActualHeight, expandedHeight);
+                Click((ToggleButton)chosen.Template.FindName("HeaderToggle", chosen)); SettleSections(window);
+                Check(chosen.IsExpanded, "Clicked active header left all sections closed");
+            }
             var controller = (AccordionMotion)typeof(InstallerWindow).GetField("accordion", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(window);
             for (int i = 0; i < 12; i++)
             {
@@ -549,9 +562,10 @@ internal static class InstallerTests
             SettleSections(window); window.UpdateLayout(); double listHeight = Control<ListBox>(window, "BackupList").ActualHeight;
             Click(Control<Button>(window, "DeleteBackup")); Equal(backups.Deleted, 0);
             Equal(Control<Border>(window, "BackupConfirmation").Visibility, Visibility.Visible);
+            Check(Control<TextBlock>(window, "BackupConfirmationText").Text.Contains(backups.Item.Path), "Confirmation must show the full selected backup path");
             window.UpdateLayout(); Equal(Control<ListBox>(window, "BackupList").ActualHeight, listHeight);
             CheckDarkList(Control<ListBox>(window, "BackupList"));
-            Capture(window, "backups-confirm", 820, 680, 96);
+            Capture(window, "backups-confirm", 900, 860, 96);
             Click(Control<Button>(window, "CancelBackup")); Equal(backups.Deleted, 0);
             Click(Control<Button>(window, "RestoreBackup")); Equal(backups.Restored, 0);
             backups.Hold = true; Click(Control<Button>(window, "ConfirmBackup"));
@@ -572,7 +586,7 @@ internal static class InstallerTests
             Click(Control<Button>(window, "RestoreBackup")); Click(Control<Button>(window, "ConfirmBackup"));
             PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled);
             Check(Control<TextBlock>(window, "BackupFeedback").Text.Contains("操作未完成"), "Restore error hidden");
-            Capture(window, "backups-error", 820, 680, 96);
+            Capture(window, "backups-error", 900, 860, 96);
         }
         finally { backups.Gate.Set(); Click(Control<Button>(window, "CancelBackup")); PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled); window.Close(); }
     }
@@ -582,6 +596,7 @@ internal static class InstallerTests
         public List<BackupEntry> Entries = new List<BackupEntry>();
         public BackupEntry Item;
         public volatile int Restored, Deleted;
+        public string LastPath;
         public bool Hold, Fail;
         public ManualResetEventSlim Gate = new ManualResetEventSlim(false);
         public FakeBackups()
@@ -593,9 +608,9 @@ internal static class InstallerTests
         public IList<BackupEntry> List() { return Entries.ToList(); }
         public string Restore(string path)
         {
-            Restored++; if (Hold && !Gate.Wait(10000)) throw new TimeoutException(); if (Fail) throw new IOException("fixture restore failed"); return path;
+            LastPath = path; Restored++; if (Hold && !Gate.Wait(10000)) throw new TimeoutException(); if (Fail) throw new IOException("fixture restore failed"); return path;
         }
-        public void Delete(string path) { Deleted++; Entries.Clear(); }
+        public void Delete(string path) { LastPath = path; Deleted++; Entries.RemoveAll(entry => entry.Path == path); }
     }
 
     private static T Control<T>(InstallerWindow window, string name) where T : class { return (T)window.FindName(name); }
@@ -647,6 +662,7 @@ internal static class InstallerTests
             var strategy = Control<ComboBox>(window, "StrategyBox");
             Check(strategy.IsKeyboardFocusWithin, "Initial keyboard focus missing");
             Check(strategy.FocusVisualStyle != null, "Strategy keyboard focus invisible");
+            Check(!Control<Button>(window, "PreviousLog").IsEnabled && !Control<Button>(window, "NextLog").IsEnabled, "Empty log pager should be disabled");
             Toggle(window, "ActivateProBox", false); Equal(model.Options.ActivatePro, false);
             Toggle(window, "ActivateProBox", true); Equal(model.Options.ActivatePro, true);
             Toggle(window, "DevToolsBox", true); Equal(model.Options.DevTools, true);
@@ -668,7 +684,7 @@ internal static class InstallerTests
             Check(Control<CheckBox>(window, "ActivateProBox").IsKeyboardFocused, "Wrong next Tab target");
             var expander = Control<Expander>(window, "LogExpander"); expander.ApplyTemplate();
             Click(Descendants(expander).OfType<ToggleButton>().First()); Check(expander.IsExpanded, "Expand log failed");
-            Click(Descendants(expander).OfType<ToggleButton>().First()); Check(!expander.IsExpanded, "Collapse log failed");
+            Click(Descendants(expander).OfType<ToggleButton>().First()); Check(expander.IsExpanded, "Active section must remain open");
         }
         finally { window.Close(); }
     }
@@ -689,7 +705,7 @@ internal static class InstallerTests
             Equal(model.Options.Scripts.Count, 2); Check(Control<Expander>(window, "LogExpander").IsExpanded, "Invalid selection hidden");
             Control<Expander>(window, "OptionsExpander").IsExpanded = true; SettleSections(window);
             ui.SelectionError = true; Click(add);
-            Check(Control<TextBox>(window, "Details").Text.Contains("dialog unavailable"), "File dialog failure was not shown");
+            Check(AllLogs(window).Contains("dialog unavailable"), "File dialog failure was not shown");
             Control<Expander>(window, "OptionsExpander").IsExpanded = true; SettleSections(window);
             var remove = Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().First();
             Equal(System.Windows.Automation.AutomationProperties.GetName(remove), "移除脚本 " + Path.GetFileName(script));
@@ -721,7 +737,7 @@ internal static class InstallerTests
             Click(remove); Equal(model.Options.Scripts.Count, 1);
             Equal(ui.Config.CustomScriptPaths.Single(), ui.Files.Single());
             window.Close(); Check(window.IsVisible, "Close interrupted an active installation");
-            Capture(window, "buttons-busy", 820, 680, 96);
+            Capture(window, "buttons-busy", 900, 860, 96);
             ui.Session.Gate.Set(); PumpUntil(() => model.State == "Error" && ui.Session.Disposed);
             Check(ui.Session.FailureRecorded, "Failure not recorded");
             Equal(Control<Button>(window, "InstallButton").Content, "重试安装");
@@ -737,8 +753,8 @@ internal static class InstallerTests
             forum.RaiseEvent(navigate); Check(navigate.Handled, "Forum event not handled"); Equal(ui.Opened.Last(), "https://bbs.gbtgame.me/");
             Control<ScrollViewer>(window, "SettingsScroll").ScrollToTop(); window.UpdateLayout();
             ui.OpenError = true; Click(Control<Button>(window, "OpenLog"));
-            Check(Control<TextBox>(window, "Details").Text.Contains("无法打开："), "Open failure invisible"); ui.OpenError = false;
-            Capture(window, "buttons-error", 820, 680, 96);
+            Check(AllLogs(window).Contains("无法打开："), "Open failure invisible"); ui.OpenError = false;
+            Capture(window, "buttons-error", 900, 860, 96);
             var logBounds = Control<TextBox>(window, "Details").TransformToAncestor(Control<Grid>(window, "ContentSections")).TransformBounds(new Rect(Control<TextBox>(window, "Details").RenderSize));
             Check(logBounds.Top >= 0 && logBounds.Bottom <= Control<Grid>(window, "ContentSections").ActualHeight + 1, "Log section left the fixed content viewport");
             ui.Hold = true; ui.Fail = false;
@@ -748,7 +764,7 @@ internal static class InstallerTests
             ui.Session.Gate.Set(); PumpUntil(() => model.State == "Success" && ui.Session.Disposed);
             Check(!ui.Session.Launched, "Launch opt-out was lost"); Equal(model.Stages[5].State, "已跳过");
             Check(!Control<UIElement>(window, "OptionsEditor").IsEnabled, "Success options remained editable");
-            Capture(window, "buttons-success", 820, 680, 96);
+            Capture(window, "buttons-success", 900, 860, 96);
             Click(Control<Button>(window, "InstallButton")); Check(!window.IsVisible, "Finish did not close the window"); Equal(ui.Created, 2);
         }
         finally { if (ui.Session != null && !ui.Session.Disposed) ui.Session.Gate.Set(); PumpUntil(() => !model.IsBusy); window.Close(); }
@@ -765,8 +781,8 @@ internal static class InstallerTests
             Toggle(window, "DevToolsBox", true);
             Click(Control<Button>(window, "InstallButton")); PumpUntil(() => model.State == "Error" && ui.Session.Disposed);
             Check(model.Message.Contains("fixture install failure"), "Log failure replaced the actual installation error");
-            Check(Control<TextBox>(window, "Details").Text.Contains("无法保存错误日志："), "Write failure not handled");
-            Check(Control<TextBox>(window, "Details").Text.Contains("无法关闭日志："), "Dispose failure not handled");
+            Check(AllLogs(window).Contains("无法保存错误日志："), "Write failure not handled");
+            Check(AllLogs(window).Contains("无法关闭日志："), "Dispose failure not handled");
             ui.Fail = false; ui.LogError = false;
             Click(Control<Button>(window, "InstallButton")); PumpUntil(() => model.State == "Success" && ui.Session.Disposed);
             Check(ui.Session.Launched, "Default launch choice was lost");
@@ -774,9 +790,16 @@ internal static class InstallerTests
         }
         finally { PumpUntil(() => !model.IsBusy); window.Close(); }
     }
+    private static string AllLogs(InstallerWindow window)
+    {
+        var pages = (List<string>)typeof(InstallerWindow).GetField("logPages", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(window);
+        return string.Concat(pages);
+    }
     private static void TestLongContent()
     {
-        var window = new InstallerWindow(new FakeInteraction()); window.Show();
+        var backups = new FakeBackups();
+        for (int i = 1; i < 7; i++) backups.Entries.Add(new BackupEntry { Path = Path.Combine(backups.Root, "backup-" + i), Label = "备份 " + i, Summary = "Wand 用户配置", CanRestore = true });
+        var window = new InstallerWindow(new FakeInteraction(), backups); window.Show();
         try
         {
             var model = (InstallerViewModel)window.DataContext;
@@ -786,22 +809,74 @@ internal static class InstallerTests
                 File.WriteAllText(script, "void 0;"); model.Options.AddScript(script);
             }
             Control<Expander>(window, "OptionsExpander").IsExpanded = true;
-            Control<TextBox>(window, "Details").Text = string.Join("\n", Enumerable.Repeat("用于检查滚动和长日志显示的测试记录。", 100));
-            Capture(window, "long-content-minimum", 820, 680, 96);
-            var scripts = Control<ScrollViewer>(window, "ScriptScroll"); var settings = Control<ScrollViewer>(window, "SettingsScroll");
-            Check(scripts.ScrollableHeight > 0 && settings.ScrollableHeight > 0, "Long content cannot scroll");
-            scripts.ScrollToEnd(); settings.ScrollToEnd(); window.UpdateLayout();
-            Check(scripts.VerticalOffset > 0 && settings.VerticalOffset > 0, "Hidden scrollbar also disabled scrolling");
+            model.Options.MoveScriptPage(-100);
+            var seenScripts = new HashSet<string>();
+            do
+            {
+                window.UpdateLayout();
+                foreach (var item in model.Options.VisibleScripts) seenScripts.Add(item.FullPath);
+                Equal(Control<ItemsControl>(window, "ScriptList").Items.Count, 2);
+                AssertNoScroll(window, "SettingsScroll"); AssertNoScroll(window, "ScriptScroll");
+                if (!model.Options.NextScripts) break;
+                Click(Control<Button>(window, "NextScripts"));
+            } while (true);
+            Equal(model.Options.Snapshot().CustomScriptPaths.Count, 18);
+            Equal(seenScripts.Count, 18); Check(!Control<Button>(window, "NextScripts").IsEnabled, "Last script page can advance");
+            Capture(window, "long-content-minimum", 900, 860, 96);
             Check(Descendants(Control<ItemsControl>(window, "ScriptList")).OfType<Button>().All(b => b.ActualWidth >= 36), "Long filename squeezed remove controls");
-            Capture(window, "long-content-scrolled", 820, 680, 96);
+            string longText = string.Join(Environment.NewLine, Enumerable.Range(0, 100).Select(i => i + " 中文日志🙂 " + new string('字', 90))) + Environment.NewLine;
+            var pages = InstallerWindow.PaginateLog(longText);
+            Equal(string.Concat(pages), longText); Check(pages.Count > 1, "Long log was truncated");
+            typeof(InstallerWindow).GetMethod("AppendLog", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(window, new object[] { longText });
             Control<Expander>(window, "LogExpander").IsExpanded = true;
-            Capture(window, "long-log", 820, 680, 96);
-            Check(!Control<Expander>(window, "OptionsExpander").IsExpanded, "Log did not collapse options");
+            while (Control<Button>(window, "PreviousLog").IsEnabled) Click(Control<Button>(window, "PreviousLog"));
+            var seenLog = new StringBuilder();
+            do
+            {
+                window.UpdateLayout(); AssertNoScroll(window, "Details");
+                seenLog.Append(Control<TextBox>(window, "Details").Text);
+                if (!Control<Button>(window, "NextLog").IsEnabled) break;
+                Click(Control<Button>(window, "NextLog"));
+            } while (true);
+            Check(seenLog.ToString().Contains("99 中文日志🙂"), "Last log page missing");
+            Equal(seenLog.ToString(), AllLogs(window));
+            Capture(window, "long-log", 900, 860, 96);
+            Control<Expander>(window, "BackupsExpander").IsExpanded = true; SettleSections(window);
+            var seenBackups = new HashSet<string>();
+            do
+            {
+                window.UpdateLayout();
+                Equal(Control<ListBox>(window, "BackupList").Items.Count, 1);
+                seenBackups.Add(((BackupEntry)Control<ListBox>(window, "BackupList").SelectedItem).Path);
+                foreach (var scroll in Descendants(Control<ListBox>(window, "BackupList")).OfType<ScrollViewer>())
+                    Equal(scroll.VerticalOffset, 0d);
+                if (!Control<Button>(window, "NextBackups").IsEnabled) break;
+                Click(Control<Button>(window, "NextBackups"));
+            } while (true);
+            Equal(seenBackups.Count, 7);
+            string selectedPath = ((BackupEntry)Control<ListBox>(window, "BackupList").SelectedItem).Path;
+            Click(Control<Button>(window, "RestoreBackup")); Click(Control<Button>(window, "ConfirmBackup"));
+            PumpUntil(() => Control<Button>(window, "InstallButton").IsEnabled);
+            Equal(backups.LastPath, selectedPath);
+            Capture(window, "paged-backups", 900, 860, 96);
             window.WindowState = WindowState.Maximized; window.UpdateLayout();
             Check(Control<Button>(window, "InstallButton").ActualWidth >= 118, "Maximized action collapsed");
             window.WindowState = WindowState.Normal;
         }
         finally { window.Close(); }
+    }
+    private static void AssertNoScroll(InstallerWindow window, string name)
+    {
+        var viewer = window.FindName(name) as ScrollViewer;
+        if (viewer != null) {
+            Check(viewer.ExtentHeight <= viewer.ViewportHeight + 1, "Content needs scrolling: " + name); Equal(viewer.VerticalOffset, 0d);
+            var child = viewer.Content as FrameworkElement;
+            if (child != null) Check(child.ActualHeight <= viewer.ViewportHeight + 1, "Content clipped by disabled scrolling: " + name);
+            return;
+        }
+        var box = Control<TextBox>(window, name);
+        Check(box.ExtentHeight <= box.ViewportHeight + 1, "Log page needs scrolling"); Equal(box.VerticalOffset, 0d);
+        if (box.Text.Length > 0) Check(box.GetRectFromCharacterIndex(box.Text.Length - 1).Bottom <= box.ActualHeight - box.Padding.Bottom + 1, "Last log character clipped");
     }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
     {

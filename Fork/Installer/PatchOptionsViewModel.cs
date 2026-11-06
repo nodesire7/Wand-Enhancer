@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -25,14 +25,25 @@ namespace WandEnhancer.Fork.Installer
         public bool RemotePanel { get => remote; set { remote = value; Changed(nameof(RemotePanel)); } }
         public bool AutoApply { get => autoApply; set { autoApply = value; if (value) DisableUpdates = false; Changed(nameof(AutoApply)); } }
         public ObservableCollection<SelectedScript> Scripts { get; } = new ObservableCollection<SelectedScript>();
+        private int scriptPage;
         public bool HasScripts => Scripts.Count > 0;
-        public PatchOptionsViewModel() { Scripts.CollectionChanged += (sender, args) => Changed(nameof(HasScripts)); }
+        public IEnumerable<SelectedScript> VisibleScripts => Scripts.Skip(scriptPage * 2).Take(2).ToArray();
+        public string ScriptPageLabel => (scriptPage + 1) + " / " + Math.Max(1, (Scripts.Count + 1) / 2);
+        public bool PreviousScripts => scriptPage > 0;
+        public bool NextScripts => (scriptPage + 1) * 2 < Scripts.Count;
+        public void MoveScriptPage(int delta)
+        {
+            scriptPage = Math.Max(0, Math.Min(scriptPage + delta, Math.Max(0, (Scripts.Count - 1) / 2)));
+            Changed(nameof(VisibleScripts)); Changed(nameof(ScriptPageLabel)); Changed(nameof(PreviousScripts)); Changed(nameof(NextScripts));
+        }
+        public PatchOptionsViewModel() { Scripts.CollectionChanged += (sender, args) => { Changed(nameof(HasScripts)); MoveScriptPage(0); }; }
 
         public void AddScript(string path)
         {
             string full = Path.GetFullPath(path);
             if (!File.Exists(full) || !string.Equals(Path.GetExtension(full), ".js", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("请选择现有的 .js 文件。");
             if (!Scripts.Any(item => string.Equals(item.FullPath, full, StringComparison.OrdinalIgnoreCase))) Scripts.Add(new SelectedScript(full));
+            MoveScriptPage(int.MaxValue / 2);
             RemotePanel = true;
         }
 

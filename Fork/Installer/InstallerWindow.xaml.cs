@@ -1,5 +1,8 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -25,6 +28,10 @@ namespace WandEnhancer.Fork.Installer
         private readonly AccordionMotion accordion;
         private bool backupBusy;
         private string pendingBackupAction, pendingBackupPath;
+        private IList<BackupEntry> backupEntries = new List<BackupEntry>();
+        private int backupPage, logPage;
+        private readonly StringBuilder logText = new StringBuilder();
+        private List<string> logPages = new List<string> { "" };
 
         public InstallerWindow() : this(new NativeInstallerInteraction()) { }
 
@@ -38,12 +45,13 @@ namespace WandEnhancer.Fork.Installer
             BackupRootText.ToolTip = this.backups.Root;
             model = new InstallerViewModel(InstallEngine.LoadPackage().version);
             DataContext = model;
+            RenderLogPage();
             AuthorText.Text = "作者  " + BrandingInfo.Author;
             ForumText.Text = new Uri(BrandingInfo.ForumUrl).Host.ToLowerInvariant();
             ForumLink.NavigateUri = new Uri(BrandingInfo.ForumUrl.ToLowerInvariant());
             model.PropertyChanged += ModelChanged;
             Closing += OnClosing;
-            BackupsExpander.Collapsed += (sender, args) => { if (pendingBackupAction != null && !backupBusy) CancelBackupClick(sender, args); };
+            BackupsExpander.Collapsed += (sender, args) => { if (!BackupsExpander.IsExpanded && pendingBackupAction != null && !backupBusy) CancelBackupClick(sender, args); };
             PreviewKeyDown += (sender, args) => { if (args.Key == Key.Escape && pendingBackupAction != null && !backupBusy) { CancelBackupClick(sender, args); args.Handled = true; } };
             Loaded += (sender, args) => { StrategyBox.Focus(); ReloadBackups(); };
             SourceInitialized += (sender, args) =>
@@ -66,7 +74,7 @@ namespace WandEnhancer.Fork.Installer
             if (backupBusy || pendingBackupAction != null) return;
             if (model.State == "Success") { Close(); return; }
             if (!model.Begin()) return;
-            Details.Clear();
+            logText.Clear(); logPages = new List<string> { "" }; logPage = 0; RenderLogPage();
             OpenLog.Visibility = OpenBackup.Visibility = Visibility.Collapsed;
             bool launch = Launch.IsChecked == true;
             IInstallerSession engine = null;
@@ -103,9 +111,46 @@ namespace WandEnhancer.Fork.Installer
 
         private void AppendLog(string text)
         {
-            Details.AppendText(DateTime.Now.ToString("HH:mm:ss") + "  " + text + Environment.NewLine);
-            Details.ScrollToEnd();
+            bool follow = logPage == logPages.Count - 1;
+            logText.Append(DateTime.Now.ToString("HH:mm:ss") + "  " + text + Environment.NewLine);
+            logPages = PaginateLog(logText.ToString());
+            if (follow) logPage = logPages.Count - 1;
+            RenderLogPage();
         }
+
+        internal static List<string> PaginateLog(string text)
+        {
+            var pages = new List<string>(); var page = new StringBuilder(); int rows = 0;
+            string normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+            var lines = normalized.Split('\n');
+            for (int n = 0; n < lines.Length; n++)
+            {
+                if (n == lines.Length - 1 && lines[n].Length == 0) break;
+                string line = lines[n]; int[] elements = StringInfo.ParseCombiningCharacters(line);
+                int chunks = Math.Max(1, (elements.Length + 33) / 34);
+                for (int c = 0; c < chunks; c++)
+                {
+                    int start = elements.Length == 0 ? 0 : elements[c * 34];
+                    int end = (c + 1) * 34 < elements.Length ? elements[(c + 1) * 34] : line.Length;
+                    page.Append(line.Substring(start, end - start));
+                    if (c == chunks - 1 && n < lines.Length - 1) page.Append(Environment.NewLine);
+                    if (++rows == 8) { pages.Add(page.ToString()); page.Clear(); rows = 0; }
+                }
+            }
+            if (page.Length > 0 || pages.Count == 0) pages.Add(page.ToString());
+            return pages;
+        }
+        private void RenderLogPage()
+        {
+            logPage = Math.Max(0, Math.Min(logPage, logPages.Count - 1));
+            Details.Text = logPages[logPage];
+            LogPageLabel.Text = (logPage + 1) + " / " + logPages.Count;
+            PreviousLog.IsEnabled = logPage > 0; NextLog.IsEnabled = logPage < logPages.Count - 1;
+        }
+        private void PreviousLogClick(object sender, RoutedEventArgs args) { logPage--; RenderLogPage(); }
+        private void NextLogClick(object sender, RoutedEventArgs args) { logPage++; RenderLogPage(); }
+        private void PreviousScriptsClick(object sender, RoutedEventArgs args) { if (OptionsEditor.IsEnabled) model.Options.MoveScriptPage(-1); }
+        private void NextScriptsClick(object sender, RoutedEventArgs args) { if (OptionsEditor.IsEnabled) model.Options.MoveScriptPage(1); }
 
         private void ShowLog()
         {
@@ -121,6 +166,8 @@ namespace WandEnhancer.Fork.Installer
             Launch.IsEnabled = !busy && model.State != "Success";
             BackupList.IsEnabled = !busy && pendingBackupAction == null;
             RefreshBackups.IsEnabled = !busy && pendingBackupAction == null;
+            PreviousBackups.IsEnabled = !busy && pendingBackupAction == null && backupPage > 0;
+            NextBackups.IsEnabled = !busy && pendingBackupAction == null && backupPage + 1 < backupEntries.Count;
             OpenBackupRoot.IsEnabled = !busy;
             var selected = BackupList.SelectedItem as BackupEntry;
             RestoreBackup.IsEnabled = !busy && pendingBackupAction == null && selected?.CanRestore == true;
@@ -132,15 +179,28 @@ namespace WandEnhancer.Fork.Installer
         {
             try
             {
-                var entries = backups.List();
-                BackupList.ItemsSource = entries;
-                BackupList.SelectedItem = entries.FirstOrDefault(entry => string.Equals(entry.Path, selectedPath, StringComparison.OrdinalIgnoreCase)) ?? entries.FirstOrDefault();
-                BackupsExpander.Header = "配置备份 · " + entries.Count + " 份";
-                EmptyBackups.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+                selectedPath = selectedPath ?? (BackupList.SelectedItem as BackupEntry)?.Path;
+                backupEntries = backups.List();
+                int selected = backupEntries.ToList().FindIndex(entry => string.Equals(entry.Path, selectedPath, StringComparison.OrdinalIgnoreCase));
+                backupPage = selected >= 0 ? selected : 0;
+                BackupsExpander.Header = "配置备份 · " + backupEntries.Count + " 份";
+                RenderBackupPage();
             }
-            catch (Exception error) { BackupList.ItemsSource = null; EmptyBackups.Visibility = Visibility.Visible; BackupFeedback.Text = "无法读取备份：" + error.Message; }
+            catch (Exception error) { backupEntries = new List<BackupEntry>(); RenderBackupPage(); BackupFeedback.Text = "无法读取备份：" + error.Message; }
             UpdateControls();
         }
+
+        private void RenderBackupPage()
+        {
+            backupPage = Math.Max(0, Math.Min(backupPage, backupEntries.Count - 1));
+            BackupList.ItemsSource = backupEntries.Skip(backupPage).Take(1).ToArray();
+            BackupList.SelectedIndex = BackupList.Items.Count > 0 ? 0 : -1;
+            BackupPageLabel.Text = (backupPage + 1) + " / " + Math.Max(1, backupEntries.Count);
+            EmptyBackups.Visibility = backupEntries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            UpdateControls();
+        }
+        private void PreviousBackupsClick(object sender, RoutedEventArgs args) { if (PreviousBackups.IsEnabled) { backupPage--; RenderBackupPage(); } }
+        private void NextBackupsClick(object sender, RoutedEventArgs args) { if (NextBackups.IsEnabled) { backupPage++; RenderBackupPage(); } }
 
         private void BackupSelectionChanged(object sender, SelectionChangedEventArgs args)
         {
@@ -162,7 +222,7 @@ namespace WandEnhancer.Fork.Installer
             var selected = BackupList.SelectedItem as BackupEntry;
             if (backupBusy || model.IsBusy || selected == null || (action == "restore" && !selected.CanRestore)) return;
             pendingBackupAction = action; pendingBackupPath = selected.Path;
-            BackupConfirmationText.Text = selected.Label + "\n" + (action == "restore" ? "将关闭 Wand / WeMod 并替换用户配置。当前配置会先自动备份，恢复后请手动启动。" : "只删除所选备份，不影响当前 Wand 配置。删除后无法撤销。");
+            BackupConfirmationText.Text = selected.Label + "\n" + selected.Path + "\n" + (action == "restore" ? "将关闭 Wand / WeMod 并替换用户配置。当前配置会先自动备份，恢复后请手动启动。" : "只删除所选备份，不影响当前 Wand 配置。删除后无法撤销。");
             ConfirmBackup.Content = action == "restore" ? "确认恢复" : "确认删除";
             BackupConfirmation.Visibility = Visibility.Visible; UpdateControls(); ConfirmBackup.Focus();
         }
